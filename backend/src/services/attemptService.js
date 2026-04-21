@@ -31,14 +31,27 @@ const startAttempt = async (testId, userId) => {
       }
 
       // Create new attempt
-      const attemptResult = await client.query(
-        `INSERT INTO test_attempts (test_id, user_id, start_time, status)
-         VALUES ($1, $2, CURRENT_TIMESTAMP, 'in_progress')
-         RETURNING id, test_id, user_id, start_time, end_time, status, score, created_at, updated_at`,
-        [testId, userId]
-      );
+      let attempt;
+      try {
+        const attemptResult = await client.query(
+          `INSERT INTO test_attempts (test_id, user_id, start_time, status)
+           VALUES ($1, $2, CURRENT_TIMESTAMP, 'in_progress')
+           RETURNING id, test_id, user_id, start_time, end_time, status, score, created_at, updated_at`,
+          [testId, userId]
+        );
 
-      const attempt = attemptResult.rows[0];
+        attempt = attemptResult.rows[0];
+      } catch (dbError) {
+        // Handle unique constraint violation (23505 = unique_violation in PostgreSQL)
+        if (dbError.code === '23505') {
+          throw new ApiError(
+            HTTP_STATUS.CONFLICT,
+            'You have already attempted this test'
+          );
+        }
+        // Re-throw other database errors
+        throw dbError;
+      }
 
       // Fetch all questions for the test
       const questionsResult = await client.query(
@@ -124,11 +137,11 @@ const getAttempt = async (attemptId) => {
  * Submit an answer to a question
  * @param {string} attemptId - Attempt ID
  * @param {string} questionId - Question ID
- * @param {string} selectedOptionId - Selected MCQ option ID (for MCQ)
+ * @param {number} selectedOption - Selected MCQ option index (0-based, for MCQ)
  * @param {string} codeAnswer - Code submission (for Coding)
  * @returns {Promise<Object>} Saved response
  */
-const submitResponse = async (attemptId, questionId, selectedOptionId = null, codeAnswer = null) => {
+const submitResponse = async (attemptId, questionId, selectedOption = null, codeAnswer = null) => {
   const client = await db.getClient();
 
   try {
@@ -181,15 +194,32 @@ const submitResponse = async (attemptId, questionId, selectedOptionId = null, co
 
     let isCorrect = false;
     let marksObtained = 0;
+    let selectedOptionId = null;
 
     // Auto-grade MCQ
-    if (question.type === 'mcq' && selectedOptionId) {
-      const correctOptionResult = await client.query(
-        `SELECT id FROM mcq_options WHERE id = $1 AND is_correct = true AND question_id = $2`,
-        [selectedOptionId, questionId]
+    if (question.type === 'mcq' && selectedOption !== null && selectedOption !== undefined) {
+      // Fetch all options for this question, ordered by index
+      const optionsResult = await client.query(
+        `SELECT id, is_correct, order_index FROM mcq_options 
+         WHERE question_id = $1 
+         ORDER BY order_index ASC`,
+        [questionId]
       );
 
-      isCorrect = correctOptionResult.rows.length > 0;
+      const options = optionsResult.rows;
+
+      // Validate selected_option is within bounds
+      if (selectedOption < 0 || selectedOption >= options.length) {
+        throw new ApiError(
+          HTTP_STATUS.BAD_REQUEST,
+          `Invalid option index. Valid range: 0-${options.length - 1}`
+        );
+      }
+
+      // Get the selected option
+      const selectedOpt = options[selectedOption];
+      selectedOptionId = selectedOpt.id;
+      isCorrect = selectedOpt.is_correct;
       marksObtained = isCorrect ? question.marks : 0;
     }
 
@@ -213,7 +243,7 @@ const submitResponse = async (attemptId, questionId, selectedOptionId = null, co
          SET selected_option_id = $1, code_answer = $2, is_correct = $3, marks_obtained = $4, updated_at = CURRENT_TIMESTAMP
          WHERE attempt_id = $5 AND question_id = $6
          RETURNING id, attempt_id, question_id, selected_option_id, code_answer, is_correct, marks_obtained, created_at, updated_at`,
-        [selectedOptionId, codeAnswer, isCorrect, marksObtained, attemptId, questionId]
+        [selectedOptionId || null, codeAnswer || null, isCorrect, marksObtained, attemptId, questionId]
       );
       response = updateResult.rows[0];
     } else {
@@ -222,7 +252,7 @@ const submitResponse = async (attemptId, questionId, selectedOptionId = null, co
         `INSERT INTO question_responses (attempt_id, question_id, selected_option_id, code_answer, is_correct, marks_obtained)
          VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING id, attempt_id, question_id, selected_option_id, code_answer, is_correct, marks_obtained, created_at, updated_at`,
-        [attemptId, questionId, selectedOptionId, codeAnswer, isCorrect, marksObtained]
+        [attemptId, questionId, selectedOptionId || null, codeAnswer || null, isCorrect, marksObtained]
       );
       response = insertResult.rows[0];
     }

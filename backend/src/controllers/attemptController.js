@@ -69,7 +69,7 @@ const getAttempt = async (req, res, next) => {
 const submitResponse = async (req, res, next) => {
   try {
     const { attemptId } = req.params;
-    const { questionId, selectedOptionId, codeAnswer } = req.body;
+    const { questionId, selected_option, codeAnswer } = req.body;
 
     // Validate input
     if (!questionId) {
@@ -85,7 +85,7 @@ const submitResponse = async (req, res, next) => {
     const response = await attemptService.submitResponse(
       attemptId,
       questionId,
-      selectedOptionId || null,
+      selected_option !== undefined ? selected_option : null,
       codeAnswer || null
     );
 
@@ -155,15 +155,17 @@ const getCandidateAttempts = async (req, res, next) => {
 /**
  * Get all attempts for a test
  * GET /api/v1/tests/:id/attempts
- * Admin only (test creator)
+ * Admin (all tests) or test creator (own tests)
  */
 const getTestAttempts = async (req, res, next) => {
   try {
     const testId = req.params.testId || req.params.id;
 
-    // Verify test exists and user created it
+    // Verify test exists
     const test = await testService.getTestById(testId);
-    if (test.created_by !== req.user.id) {
+    
+    // Allow admins to view all test attempts, or enforce ownership for non-admins
+    if (req.user.role !== 'admin' && test.created_by !== req.user.id) {
       throw new Error('Unauthorized: You can only view attempts for your own tests');
     }
 
