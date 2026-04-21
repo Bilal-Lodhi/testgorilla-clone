@@ -36,10 +36,19 @@ const getResult = async (req, res, next) => {
  * Get all results for a test
  * GET /api/v1/tests/:testId/results
  * Admin (test creator)
+ * testId comes from mount parameter when mounted at /api/v1/tests/:testId/results
  */
 const getTestResults = async (req, res, next) => {
   try {
-    const testId = req.params.testId || req.params.id;
+    // testId is in params from the mounted router path
+    const testId = req.params.testId;
+
+    if (!testId) {
+      throw new ApiError(
+        HTTP_STATUS.BAD_REQUEST,
+        'testId is required'
+      );
+    }
 
     // Verify test exists and user created it (unless admin role allows all)
     const test = await testService.getTestById(testId);
@@ -69,7 +78,15 @@ const getTestResults = async (req, res, next) => {
  */
 const getTestStatistics = async (req, res, next) => {
   try {
-    const testId = req.params.testId || req.params.id;
+    // testId is in params from the mounted router path
+    const testId = req.params.testId;
+
+    if (!testId) {
+      throw new ApiError(
+        HTTP_STATUS.BAD_REQUEST,
+        'testId is required'
+      );
+    }
 
     // Verify test exists and user created it (unless admin role allows all)
     const test = await testService.getTestById(testId);

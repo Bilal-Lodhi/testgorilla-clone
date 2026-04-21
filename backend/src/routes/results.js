@@ -20,10 +20,12 @@ router.get(
  * GET /api/v1/tests/:testId/results
  * Get all results for a test
  * Admin (test creator)
+ * When mounted at /api/v1/tests/:testId/results, this route is just /
  */
 router.get(
-  '/test/:testId',
+  '/',
   authenticateToken,
+  adminOnly,
   asyncHandler(resultController.getTestResults)
 );
 
@@ -33,8 +35,9 @@ router.get(
  * Admin (test creator)
  */
 router.get(
-  '/test/:testId/statistics',
+  '/statistics',
   authenticateToken,
+  adminOnly,
   asyncHandler(resultController.getTestStatistics)
 );
 
