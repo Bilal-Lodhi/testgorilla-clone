@@ -5,6 +5,7 @@ const logger = require('../utils/logger');
 
 /**
  * Evaluate all responses for an attempt and create result record
+ * Idempotent: Returns existing result if attempt already submitted
  * @param {string} attemptId - Attempt ID
  * @returns {Promise<Object>} Result with scoring details
  */
@@ -21,6 +22,7 @@ const evaluateAttempt = async (attemptId) => {
     );
 
     if (attemptResult.rows.length === 0) {
+      await client.query('ROLLBACK');
       throw new ApiError(
         HTTP_STATUS.NOT_FOUND,
         'Attempt not found'
@@ -29,10 +31,38 @@ const evaluateAttempt = async (attemptId) => {
 
     const attempt = attemptResult.rows[0];
 
+    // Check if result already exists (idempotent behavior)
+    const existingResultQuery = await client.query(
+      `SELECT id, total_marks, obtained_marks, percentage, passed FROM results WHERE attempt_id = $1`,
+      [attemptId]
+    );
+
+    if (existingResultQuery.rows.length > 0) {
+      // Result already exists - return it (idempotent)
+      const existingResult = existingResultQuery.rows[0];
+      await client.query('ROLLBACK');
+      
+      logger.info('Attempt already evaluated, returning existing result', { attemptId });
+
+      return {
+        result: existingResult,
+        evaluation: {
+          totalMarks: existingResult.total_marks,
+          obtainedMarks: existingResult.obtained_marks,
+          percentage: existingResult.percentage,
+          passed: existingResult.passed,
+          passPercentage: null, // Will be fetched if needed
+        },
+        isRetry: true,
+      };
+    }
+
+    // Ensure attempt is in progress before evaluating
     if (attempt.status !== 'in_progress') {
+      await client.query('ROLLBACK');
       throw new ApiError(
         HTTP_STATUS.BAD_REQUEST,
-        'Attempt is not in progress. Cannot evaluate.'
+        'Attempt cannot be evaluated. Status must be "in_progress".'
       );
     }
 
@@ -43,6 +73,7 @@ const evaluateAttempt = async (attemptId) => {
     );
 
     if (testResult.rows.length === 0) {
+      await client.query('ROLLBACK');
       throw new ApiError(
         HTTP_STATUS.NOT_FOUND,
         'Test not found'
@@ -123,9 +154,14 @@ const evaluateAttempt = async (attemptId) => {
         passed,
         passPercentage: test.pass_percentage,
       },
+      isRetry: false,
     };
   } catch (error) {
-    await client.query('ROLLBACK');
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackError) {
+      logger.warn('Error rolling back transaction', { error: rollbackError.message });
+    }
     logger.error('Error evaluating attempt', { error: error.message });
     throw error;
   } finally {
