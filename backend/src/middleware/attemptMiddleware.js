@@ -4,8 +4,56 @@ const { HTTP_STATUS } = require('../utils/constants');
 const logger = require('../utils/logger');
 
 /**
+ * Middleware to verify ownership of attempt (auth only, no status checks)
+ * Attach attempt info to req.attempt
+ * Used by submitAttempt to allow idempotent retries
+ */
+const verifyAttemptOwnership = async (req, res, next) => {
+  try {
+    const { attemptId } = req.params;
+
+    if (!attemptId) {
+      return next();
+    }
+
+    // Get attempt details
+    const result = await db.query(
+      `SELECT id, test_id, user_id, status FROM test_attempts WHERE id = $1`,
+      [attemptId]
+    );
+
+    if (result.rows.length === 0) {
+      return next(new ApiError(
+        HTTP_STATUS.NOT_FOUND,
+        'Attempt not found'
+      ));
+    }
+
+    const attempt = result.rows[0];
+
+    // Verify ownership: user must own this attempt
+    if (attempt.user_id !== req.user.id) {
+      return next(new ApiError(
+        HTTP_STATUS.FORBIDDEN,
+        'Unauthorized: You can only access your own attempts'
+      ));
+    }
+
+    // Attach to request
+    req.attempt = attempt;
+
+    next();
+  } catch (error) {
+    logger.error('Error in verifyAttemptOwnership middleware', { error: error.message });
+    next(error);
+  }
+};
+
+/**
  * Middleware to check active attempt and enforce duration limits
  * Attach attempt info to req.attempt if exists
+ * Used by getAttempt and submitResponse routes
+ * NOT used by submitAttempt to allow idempotent retries
  */
 const checkActiveAttempt = async (req, res, next) => {
   try {
@@ -98,6 +146,7 @@ const preventMultipleAttempts = async (req, res, next) => {
 };
 
 module.exports = {
+  verifyAttemptOwnership,
   checkActiveAttempt,
   preventMultipleAttempts,
 };
