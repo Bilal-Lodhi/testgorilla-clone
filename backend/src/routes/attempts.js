@@ -2,7 +2,7 @@ const express = require('express');
 const attemptController = require('../controllers/attemptController');
 const { authenticateToken, adminOnly, candidateOnly } = require('../middleware/authMiddleware');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { checkActiveAttempt, preventMultipleAttempts } = require('../middleware/attemptMiddleware');
+const { checkActiveAttempt, verifyAttemptOwnership, preventMultipleAttempts } = require('../middleware/attemptMiddleware');
 
 const router = express.Router({ mergeParams: true });
 
@@ -46,12 +46,14 @@ router.post(
 /**
  * POST /api/v1/attempts/:attemptId/submit
  * Submit entire test attempt
+ * Uses verifyAttemptOwnership instead of checkActiveAttempt to allow idempotent retries
+ * Status checks and idempotency logic handled in service layer
  */
 router.post(
   '/:attemptId/submit',
   authenticateToken,
   candidateOnly,
-  checkActiveAttempt,
+  verifyAttemptOwnership,
   asyncHandler(attemptController.submitAttempt)
 );
 
