@@ -278,6 +278,7 @@ const submitResponse = async (attemptId, questionId, selectedOption = null, code
 
 /**
  * Submit entire test - delegate to evaluation service for scoring
+ * Idempotent: Multiple submissions return same result instead of erroring
  * @param {string} attemptId - Attempt ID
  * @returns {Promise<Object>} Completed attempt with result details
  */
@@ -295,24 +296,28 @@ const submitAttempt = async (attemptId) => {
 
     const attempt = attemptResult.rows[0];
 
-    logger.info('Test attempt submitted via evaluation', {
+    const logMessage = evaluationResult.isRetry 
+      ? 'Test attempt resubmitted (idempotent - returning cached result)'
+      : 'Test attempt submitted and evaluated';
+
+    logger.info(logMessage, {
       attemptId,
       obtained: evaluationResult.evaluation.obtainedMarks,
       total: evaluationResult.evaluation.totalMarks,
       percentage: evaluationResult.evaluation.percentage,
       passed: evaluationResult.evaluation.passed,
+      isRetry: evaluationResult.isRetry,
     });
 
     return {
       attempt,
       result: evaluationResult.evaluation,
       resultRecord: evaluationResult.result,
+      isRetry: evaluationResult.isRetry,
     };
   } catch (error) {
     logger.error('Error submitting attempt', { error: error.message });
     throw error;
-  } finally {
-    client.release();
   }
 };
 
