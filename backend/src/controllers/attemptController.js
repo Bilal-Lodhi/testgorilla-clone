@@ -1,6 +1,7 @@
 const attemptService = require('../services/attemptService');
 const testService = require('../services/testService');
 const { HTTP_STATUS } = require('../utils/constants');
+const { ApiError } = require('../middleware/errorHandler');
 
 /**
  * Start a test attempt
@@ -13,14 +14,20 @@ const startAttempt = async (req, res, next) => {
     const userId = req.user.id;
 
     if (req.user.role !== 'candidate') {
-      throw new Error('Only candidates can take tests');
+      throw new ApiError(
+        HTTP_STATUS.FORBIDDEN,
+        'Only candidates can take tests'
+      );
     }
 
     // Verify test exists and is published
     const test = await testService.getTestById(testId);
 
     if (test.status !== 'published') {
-      throw new Error('Test is not published. Cannot start attempt.');
+      throw new ApiError(
+        HTTP_STATUS.BAD_REQUEST,
+        'Test is not published. Cannot start attempt.'
+      );
     }
 
     const result = await attemptService.startAttempt(testId, userId);
@@ -48,7 +55,10 @@ const getAttempt = async (req, res, next) => {
 
     // Verify user owns this attempt (candidate) or is admin
     if (req.user.role === 'candidate' && attempt.user_id !== req.user.id) {
-      throw new Error('Unauthorized: You can only view your own attempts');
+      throw new ApiError(
+        HTTP_STATUS.FORBIDDEN,
+        'Unauthorized: You can only view your own attempts'
+      );
     }
 
     res.status(HTTP_STATUS.OK).json({
@@ -73,13 +83,19 @@ const submitResponse = async (req, res, next) => {
 
     // Validate input
     if (!questionId) {
-      throw new Error('questionId is required');
+      throw new ApiError(
+        HTTP_STATUS.BAD_REQUEST,
+        'questionId is required'
+      );
     }
 
     // Verify user owns this attempt
     const attempt = await attemptService.getAttempt(attemptId);
     if (attempt.user_id !== req.user.id) {
-      throw new Error('Unauthorized: You can only submit answers to your own attempts');
+      throw new ApiError(
+        HTTP_STATUS.FORBIDDEN,
+        'Unauthorized: You can only submit answers to your own attempts'
+      );
     }
 
     const response = await attemptService.submitResponse(
@@ -103,6 +119,7 @@ const submitResponse = async (req, res, next) => {
  * Submit entire test attempt
  * POST /api/v1/attempts/:attemptId/submit
  * Candidate (own attempt)
+ * Idempotent: Multiple submissions return same result
  */
 const submitAttempt = async (req, res, next) => {
   try {
@@ -111,14 +128,21 @@ const submitAttempt = async (req, res, next) => {
     // Verify user owns this attempt
     const attempt = await attemptService.getAttempt(attemptId);
     if (attempt.user_id !== req.user.id) {
-      throw new Error('Unauthorized: You can only submit your own attempts');
+      throw new ApiError(
+        HTTP_STATUS.FORBIDDEN,
+        'Unauthorized: You can only submit your own attempts'
+      );
     }
 
     const result = await attemptService.submitAttempt(attemptId);
 
+    const message = result.isRetry
+      ? 'Test already submitted. Returning previous result.'
+      : 'Test submitted and evaluated successfully';
+
     res.status(HTTP_STATUS.OK).json({
       success: true,
-      message: 'Test submitted successfully',
+      message,
       data: result,
     });
   } catch (error) {
@@ -166,7 +190,10 @@ const getTestAttempts = async (req, res, next) => {
     
     // Allow admins to view all test attempts, or enforce ownership for non-admins
     if (req.user.role !== 'admin' && test.created_by !== req.user.id) {
-      throw new Error('Unauthorized: You can only view attempts for your own tests');
+      throw new ApiError(
+        HTTP_STATUS.FORBIDDEN,
+        'Unauthorized: You can only view attempts for your own tests'
+      );
     }
 
     const attempts = await attemptService.getTestAttempts(testId);
