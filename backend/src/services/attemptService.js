@@ -2,6 +2,7 @@ const db = require('../config/db');
 const { ApiError } = require('../middleware/errorHandler');
 const { HTTP_STATUS } = require('../utils/constants');
 const logger = require('../utils/logger');
+const evaluationService = require('./evaluationService');
 
 /**
  * Start a test attempt - candidate begins taking a test
@@ -276,106 +277,38 @@ const submitResponse = async (attemptId, questionId, selectedOption = null, code
 };
 
 /**
- * Submit entire test - mark attempt as submitted and calculate total score
+ * Submit entire test - delegate to evaluation service for scoring
  * @param {string} attemptId - Attempt ID
- * @returns {Promise<Object>} Completed attempt with final score
+ * @returns {Promise<Object>} Completed attempt with result details
  */
 const submitAttempt = async (attemptId) => {
-  const client = await db.getClient();
-
   try {
-    await client.query('BEGIN');
+    // Use evaluation service to evaluate and create result record
+    const evaluationResult = await evaluationService.evaluateAttempt(attemptId);
 
-    // Get attempt
-    const attemptResult = await client.query(
-      `SELECT id, test_id, user_id, start_time, status FROM test_attempts WHERE id = $1`,
+    // Get the updated attempt details
+    const attemptResult = await db.query(
+      `SELECT id, test_id, user_id, start_time, end_time, status, score, created_at, updated_at
+       FROM test_attempts WHERE id = $1`,
       [attemptId]
     );
-
-    if (attemptResult.rows.length === 0) {
-      throw new ApiError(
-        HTTP_STATUS.NOT_FOUND,
-        'Attempt not found'
-      );
-    }
 
     const attempt = attemptResult.rows[0];
 
-    if (attempt.status !== 'in_progress') {
-      throw new ApiError(
-        HTTP_STATUS.BAD_REQUEST,
-        'Attempt is already submitted'
-      );
-    }
-
-    // Calculate total score from all responses
-    const scoreResult = await client.query(
-      `SELECT COALESCE(SUM(marks_obtained), 0) as total_score
-       FROM question_responses WHERE attempt_id = $1`,
-      [attemptId]
-    );
-
-    const totalScore = parseInt(scoreResult.rows[0].total_score);
-
-    // Update attempt: mark as submitted, set end time, calculate score
-    const updateResult = await client.query(
-      `UPDATE test_attempts
-       SET status = 'submitted', end_time = CURRENT_TIMESTAMP, score = $1, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $2
-       RETURNING id, test_id, user_id, start_time, end_time, status, score, created_at, updated_at`,
-      [totalScore, attemptId]
-    );
-
-    const completedAttempt = updateResult.rows[0];
-
-    // Get test info to calculate pass status
-    const testResult = await client.query(
-      `SELECT id, pass_percentage FROM tests WHERE id = $1`,
-      [attempt.test_id]
-    );
-
-    if (testResult.rows.length === 0) {
-      throw new ApiError(
-        HTTP_STATUS.NOT_FOUND,
-        'Test not found'
-      );
-    }
-
-    const test = testResult.rows[0];
-
-    // Get total marks for the test
-    const totalMarksResult = await client.query(
-      `SELECT COALESCE(SUM(marks), 0) as total_marks FROM questions WHERE test_id = $1`,
-      [attempt.test_id]
-    );
-
-    const totalMarks = parseInt(totalMarksResult.rows[0].total_marks);
-
-    // Calculate percentage
-    const percentage = totalMarks > 0 ? Math.round((totalScore / totalMarks) * 100) : 0;
-    const passed = percentage >= test.pass_percentage;
-
-    await client.query('COMMIT');
-
-    logger.info('Test attempt submitted', {
+    logger.info('Test attempt submitted via evaluation', {
       attemptId,
-      totalScore,
-      percentage,
-      passed,
+      obtained: evaluationResult.evaluation.obtainedMarks,
+      total: evaluationResult.evaluation.totalMarks,
+      percentage: evaluationResult.evaluation.percentage,
+      passed: evaluationResult.evaluation.passed,
     });
 
     return {
-      attempt: completedAttempt,
-      result: {
-        totalScore,
-        totalMarks,
-        percentage,
-        passed,
-        passPercentage: test.pass_percentage,
-      },
+      attempt,
+      result: evaluationResult.evaluation,
+      resultRecord: evaluationResult.result,
     };
   } catch (error) {
-    await client.query('ROLLBACK');
     logger.error('Error submitting attempt', { error: error.message });
     throw error;
   } finally {

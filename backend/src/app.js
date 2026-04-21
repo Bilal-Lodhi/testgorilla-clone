@@ -7,6 +7,7 @@ const authRoutes = require('./routes/auth');
 const testRoutes = require('./routes/tests');
 const questionRoutes = require('./routes/questions');
 const attemptRoutes = require('./routes/attempts');
+const resultRoutes = require('./routes/results');
 const logger = require('./utils/logger');
 
 // Create Express app
@@ -49,6 +50,11 @@ app.use('/api/v1/tests/:testId/attempts', attemptRoutes);
 app.use('/api/v1/attempts', attemptRoutes);
 app.use('/api/v1/candidates/attempts', attemptRoutes);
 
+// Results and evaluation routes
+app.use('/api/v1/results', resultRoutes);
+app.use('/api/v1/tests/:testId/results', resultRoutes);
+app.use('/api/v1/candidates/:userId/results', resultRoutes);
+
 // API welcome route
 app.get('/', (req, res) => {
   res.json({
@@ -87,6 +93,12 @@ app.get('/', (req, res) => {
         submit: 'POST /api/v1/attempts/:attemptId/submit (candidate only)',
         candidateAttempts: 'GET /api/v1/candidates/attempts (candidate)',
         testAttempts: 'GET /api/v1/tests/:testId/attempts (admin only)',
+      },
+      results: {
+        getAttemptResult: 'GET /api/v1/results/:attemptId (candidate own or admin)',
+        getTestResults: 'GET /api/v1/tests/:testId/results (admin only)',
+        getTestStatistics: 'GET /api/v1/tests/:testId/results/statistics (admin only)',
+        getCandidateResults: 'GET /api/v1/candidates/:userId/results (candidate own or admin)',
       },
     },
   });
