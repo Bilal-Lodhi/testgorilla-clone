@@ -120,20 +120,13 @@ const submitResponse = async (req, res, next) => {
  * POST /api/v1/attempts/:attemptId/submit
  * Candidate (own attempt)
  * Idempotent: Multiple submissions return same result
+ * Middleware (verifyAttemptOwnership) already verified authentication and ownership
  */
 const submitAttempt = async (req, res, next) => {
   try {
     const { attemptId } = req.params;
 
-    // Verify user owns this attempt
-    const attempt = await attemptService.getAttempt(attemptId);
-    if (attempt.user_id !== req.user.id) {
-      throw new ApiError(
-        HTTP_STATUS.FORBIDDEN,
-        'Unauthorized: You can only submit your own attempts'
-      );
-    }
-
+    // Attempt ownership already verified by verifyAttemptOwnership middleware
     const result = await attemptService.submitAttempt(attemptId);
 
     const message = result.isRetry
