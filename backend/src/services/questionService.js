@@ -80,11 +80,24 @@ const createQuestion = async ({
       if (type === QUESTION_TYPES.MCQ && options.length > 0) {
         for (let i = 0; i < options.length; i++) {
           const isCorrect = i === correct_option;
+          const optionValue = options[i];
+          const optionText =
+            typeof optionValue === 'string'
+              ? optionValue
+              : optionValue?.option_text || optionValue?.text || '';
+
+          if (!optionText) {
+            throw new ApiError(
+              HTTP_STATUS.BAD_REQUEST,
+              `Option text is required for option at index ${i}`
+            );
+          }
+
           const optionResult = await client.query(
             `INSERT INTO mcq_options (question_id, option_text, is_correct, order_index, created_at)
              VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
              RETURNING id, question_id, option_text, is_correct, order_index`,
-            [question.id, options[i], isCorrect, i]
+            [question.id, optionText, isCorrect, i]
           );
           questionWithOptions.options.push(optionResult.rows[0]);
         }

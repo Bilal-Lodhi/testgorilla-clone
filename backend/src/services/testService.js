@@ -43,6 +43,13 @@ const createTest = async ({
     );
   }
 
+  if (status === TEST_STATUS.PUBLISHED) {
+    throw new ApiError(
+      HTTP_STATUS.BAD_REQUEST,
+      'A test must have at least 1 question before it can be published'
+    );
+  }
+
   try {
     const result = await db.query(
       `INSERT INTO tests (title, description, duration_minutes, created_by, status, pass_percentage, created_at)
@@ -73,9 +80,25 @@ const createTest = async ({
  */
 const getTestById = async (testId) => {
   const result = await db.query(
-    `SELECT t.*, u.name as created_by_name
+    `SELECT
+       t.id,
+       t.title,
+       t.description,
+       t.duration_minutes,
+       t.created_by,
+       t.status,
+       t.pass_percentage,
+       t.created_at,
+       t.updated_at,
+       COALESCE(question_counts.total_questions, 0) AS total_questions,
+       u.name as created_by_name
      FROM tests t
      LEFT JOIN users u ON t.created_by = u.id
+     LEFT JOIN (
+       SELECT test_id, COUNT(*)::int AS total_questions
+       FROM questions
+       GROUP BY test_id
+     ) question_counts ON question_counts.test_id = t.id
      WHERE t.id = $1`,
     [testId]
   );
@@ -106,7 +129,26 @@ const getAllTests = async ({
   limit = 10,
 } = {}) => {
   try {
-    let query = `SELECT t.*, u.name as created_by_name FROM tests t LEFT JOIN users u ON t.created_by = u.id WHERE 1=1`;
+    let query = `SELECT
+      t.id,
+      t.title,
+      t.description,
+      t.duration_minutes,
+      t.created_by,
+      t.status,
+      t.pass_percentage,
+      t.created_at,
+      t.updated_at,
+      COALESCE(question_counts.total_questions, 0) AS total_questions,
+      u.name as created_by_name
+    FROM tests t
+    LEFT JOIN users u ON t.created_by = u.id
+    LEFT JOIN (
+      SELECT test_id, COUNT(*)::int AS total_questions
+      FROM questions
+      GROUP BY test_id
+    ) question_counts ON question_counts.test_id = t.id
+    WHERE 1=1`;
     const params = [];
     let paramCount = 1;
 
@@ -123,8 +165,20 @@ const getAllTests = async ({
     }
 
     // Get total count
-    const countQuery = query.replace(/SELECT t\.\*, u\.name as created_by_name FROM/, 'SELECT COUNT(*) FROM');
-    const countResult = await db.query(countQuery, params);
+    let countQuery = `SELECT COUNT(*) FROM tests t WHERE 1=1`;
+    const countParams = [];
+
+    if (status) {
+      countQuery += ` AND t.status = $${countParams.length + 1}`;
+      countParams.push(status);
+    }
+
+    if (created_by) {
+      countQuery += ` AND t.created_by = $${countParams.length + 1}`;
+      countParams.push(created_by);
+    }
+
+    const countResult = await db.query(countQuery, countParams);
     const total = parseInt(countResult.rows[0].count);
 
     // Get paginated results
@@ -211,6 +265,16 @@ const updateTest = async (testId, updateData) => {
           HTTP_STATUS.BAD_REQUEST,
           `Invalid status. Must be one of: ${Object.values(TEST_STATUS).join(', ')}`
         );
+      }
+
+      if (field === 'status' && value === TEST_STATUS.PUBLISHED) {
+        const currentTest = await getTestById(testId);
+        if ((currentTest.total_questions || 0) < 1) {
+          throw new ApiError(
+            HTTP_STATUS.BAD_REQUEST,
+            'A test must have at least 1 question before it can be published'
+          );
+        }
       }
 
       updates.push(`${field} = $${paramCount}`);
