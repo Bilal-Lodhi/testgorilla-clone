@@ -209,18 +209,28 @@ const submitResponse = async (attemptId, questionId, selectedOption = null, code
 
       const options = optionsResult.rows;
 
-      // Validate selected_option is within bounds
-      if (selectedOption < 0 || selectedOption >= options.length) {
+      const isNumericString =
+        typeof selectedOption === 'string' && /^\d+$/.test(selectedOption);
+      const selectedOptionIndex =
+        typeof selectedOption === 'number'
+          ? selectedOption
+          : isNumericString
+            ? Number.parseInt(selectedOption, 10)
+            : null;
+
+      const selectedOptionRecord = Number.isInteger(selectedOptionIndex)
+        ? options[selectedOptionIndex]
+        : options.find((option) => option.id === selectedOption);
+
+      if (!selectedOptionRecord) {
         throw new ApiError(
           HTTP_STATUS.BAD_REQUEST,
-          `Invalid option index. Valid range: 0-${options.length - 1}`
+          'Invalid selected option. Provide a valid option id or index.'
         );
       }
 
-      // Get the selected option
-      const selectedOpt = options[selectedOption];
-      selectedOptionId = selectedOpt.id;
-      isCorrect = selectedOpt.is_correct;
+      selectedOptionId = selectedOptionRecord.id;
+      isCorrect = selectedOptionRecord.is_correct;
       marksObtained = isCorrect ? question.marks : 0;
     }
 

@@ -79,7 +79,13 @@ const getAttempt = async (req, res, next) => {
 const submitResponse = async (req, res, next) => {
   try {
     const { attemptId } = req.params;
-    const { questionId, selected_option, codeAnswer } = req.body;
+    const {
+      questionId,
+      selected_option,
+      selectedOptionId,
+      selected_option_id,
+      codeAnswer,
+    } = req.body;
 
     // Validate input
     if (!questionId) {
@@ -101,7 +107,7 @@ const submitResponse = async (req, res, next) => {
     const response = await attemptService.submitResponse(
       attemptId,
       questionId,
-      selected_option !== undefined ? selected_option : null,
+      selected_option ?? selectedOptionId ?? selected_option_id ?? null,
       codeAnswer || null
     );
 
