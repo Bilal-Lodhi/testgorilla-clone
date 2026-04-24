@@ -6,7 +6,7 @@ const logger = require('../utils/logger');
  * Allows requests from specified origins
  */
 const configureCors = () => {
-  const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:3000').split(',');
+  const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:*').split(',');
 
   logger.info('CORS enabled for origins:', { origins: allowedOrigins });
 
@@ -17,7 +17,12 @@ const configureCors = () => {
         return callback(null, true);
       }
 
-      if (allowedOrigins.includes(origin)) {
+      // Allow all localhost origins in development
+      if (origin && origin.startsWith('http://localhost')) {
+        callback(null, true);
+      } else if (origin && origin.startsWith('http://127.0.0.1')) {
+        callback(null, true);
+      } else if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
         callback(null, true);
       } else {
         const message = `CORS policy: Origin ${origin} is not allowed`;
