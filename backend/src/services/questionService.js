@@ -3,6 +3,28 @@ const { ApiError } = require('../middleware/errorHandler');
 const { HTTP_STATUS, QUESTION_TYPES } = require('../utils/constants');
 const logger = require('../utils/logger');
 
+const resolveQuestionOrderIndex = async (client, testId, requestedOrderIndex) => {
+  if (Number.isInteger(requestedOrderIndex) && requestedOrderIndex >= 0) {
+    const existingResult = await client.query(
+      'SELECT 1 FROM questions WHERE test_id = $1 AND order_index = $2 LIMIT 1',
+      [testId, requestedOrderIndex]
+    );
+
+    if (existingResult.rows.length === 0) {
+      return requestedOrderIndex;
+    }
+  }
+
+  const nextResult = await client.query(
+    `SELECT COALESCE(MAX(order_index), -1) + 1 AS next_order_index
+     FROM questions
+     WHERE test_id = $1`,
+    [testId]
+  );
+
+  return nextResult.rows[0].next_order_index;
+};
+
 /**
  * Create a new question (MCQ or Coding)
  * @param {Object} questionData - Question data
@@ -65,12 +87,14 @@ const createQuestion = async ({
     try {
       await client.query('BEGIN');
 
+      const resolvedOrderIndex = await resolveQuestionOrderIndex(client, test_id, order_index);
+
       // Create question
       const questionResult = await client.query(
         `INSERT INTO questions (test_id, type, question_text, marks, order_index, created_at)
          VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
          RETURNING id, test_id, type, question_text, marks, order_index, created_at, updated_at`,
-        [test_id, type, question_text, marks, order_index]
+        [test_id, type, question_text, marks, resolvedOrderIndex]
       );
 
       const question = questionResult.rows[0];
