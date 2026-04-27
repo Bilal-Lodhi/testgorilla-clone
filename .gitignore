@@ -44,3 +44,7 @@ pubspec.lock
 
 # Always keep README files
 !README.md
+
+# Backend markdown documentation (keep only README.md)
+backend/*.md
+!backend/README.md
