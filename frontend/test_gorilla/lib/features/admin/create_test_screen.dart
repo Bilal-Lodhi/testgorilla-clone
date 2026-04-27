@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:test_gorilla/core/api/api_client.dart';
 import 'package:test_gorilla/core/constants/api_constants.dart';
+import 'package:test_gorilla/core/theme/app_theme.dart';
+import 'package:test_gorilla/features/shared/widgets/app_widgets.dart'
+    as app_widgets;
 
 class CreateTestScreen extends StatefulWidget {
   const CreateTestScreen({Key? key}) : super(key: key);
@@ -31,6 +34,10 @@ class _CreateTestScreenState extends State<CreateTestScreen> {
   }
 
   void _handleCreateTest() async {
+    if (_isLoading) {
+      return;
+    }
+
     if (!_formKey.currentState!.validate()) return;
 
     setState(() {
@@ -81,165 +88,211 @@ class _CreateTestScreenState extends State<CreateTestScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isMobile = MediaQuery.of(context).size.width < 600;
-
     return Scaffold(
-      appBar: AppBar(title: Text('Create Test'), elevation: 0),
-      body: SingleChildScrollView(
-        padding: EdgeInsets.all(isMobile ? 16 : 24),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: 600),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  TextFormField(
-                    controller: _titleController,
-                    decoration: InputDecoration(
-                      labelText: 'Test Title',
-                      prefixIcon: Icon(Icons.title),
-                      hintText: 'Enter test title',
+      appBar: AppBar(title: const Text('Create Test')),
+      body: app_widgets.AppPageScaffold(
+        maxContentWidth: 840,
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              app_widgets.GlassPanel(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'New Assessment',
+                      style: Theme.of(context).textTheme.headlineSmall,
                     ),
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Title is required';
-                      }
-                      if (value.length < 3) {
-                        return 'Title must be at least 3 characters';
-                      }
-                      return null;
-                    },
-                  ),
-                  SizedBox(height: 16),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Configure basic details now. You can add questions right after creating the test.',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: const Color(0xFF64748B),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    TextFormField(
+                      controller: _titleController,
+                      decoration: const InputDecoration(
+                        labelText: 'Test Title',
+                        prefixIcon: Icon(Icons.title),
+                        hintText: 'Frontend Engineer Screening',
+                      ),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Title is required';
+                        }
+                        if (value.length < 3) {
+                          return 'Title must be at least 3 characters';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _descriptionController,
+                      decoration: const InputDecoration(
+                        labelText: 'Description',
+                        prefixIcon: Icon(Icons.description_outlined),
+                        hintText: 'Briefly describe what this test evaluates',
+                      ),
+                      maxLines: 4,
+                    ),
+                    const SizedBox(height: 16),
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        final stacked = constraints.maxWidth < 620;
 
-                  TextFormField(
-                    controller: _descriptionController,
-                    decoration: InputDecoration(
-                      labelText: 'Description',
-                      prefixIcon: Icon(Icons.description),
-                      hintText: 'Enter test description',
-                    ),
-                    maxLines: 4,
-                  ),
-                  SizedBox(height: 16),
-
-                  TextFormField(
-                    controller: _durationController,
-                    keyboardType: TextInputType.number,
-                    decoration: InputDecoration(
-                      labelText: 'Duration (minutes)',
-                      prefixIcon: Icon(Icons.timer),
-                      hintText: 'Enter test duration',
-                    ),
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Duration is required';
-                      }
-                      if (int.tryParse(value) == null) {
-                        return 'Please enter a valid number';
-                      }
-                      if (int.parse(value) <= 0) {
-                        return 'Duration must be greater than 0';
-                      }
-                      return null;
-                    },
-                  ),
-                  SizedBox(height: 16),
-
-                  TextFormField(
-                    controller: _passPercentageController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Pass Percentage',
-                      prefixIcon: Icon(Icons.percent),
-                      hintText: 'Enter pass percentage',
-                    ),
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Pass percentage is required';
-                      }
-                      final percentage = int.tryParse(value);
-                      if (percentage == null) {
-                        return 'Please enter a valid number';
-                      }
-                      if (percentage < 0 || percentage > 100) {
-                        return 'Percentage must be between 0 and 100';
-                      }
-                      return null;
-                    },
-                  ),
-                  SizedBox(height: 24),
-
-                  DropdownButtonFormField<String>(
-                    initialValue: _selectedStatus,
-                    decoration: const InputDecoration(
-                      labelText: 'Initial Status',
-                      prefixIcon: Icon(Icons.flag_outlined),
-                      helperText:
-                          'Tests start as drafts. Publish them after adding questions.',
-                    ),
-                    items: const [
-                      DropdownMenuItem(value: 'draft', child: Text('Draft')),
-                    ],
-                    onChanged: _isLoading
-                        ? null
-                        : (value) {
-                            if (value == null) {
-                              return;
+                        final durationField = TextFormField(
+                          controller: _durationController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Duration (minutes)',
+                            prefixIcon: Icon(Icons.timer_outlined),
+                            hintText: '60',
+                          ),
+                          validator: (value) {
+                            if (value == null || value.isEmpty) {
+                              return 'Duration is required';
                             }
-
-                            setState(() {
-                              _selectedStatus = value;
-                            });
+                            if (int.tryParse(value) == null) {
+                              return 'Please enter a valid number';
+                            }
+                            if (int.parse(value) <= 0) {
+                              return 'Duration must be greater than 0';
+                            }
+                            return null;
                           },
-                  ),
-                  SizedBox(height: 24),
+                        );
 
-                  if (_error != null) ...[
-                    Container(
-                      padding: EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.red[50],
-                        border: Border.all(color: Colors.red),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        _error!,
-                        style: TextStyle(color: Colors.red[700]),
-                      ),
+                        final passField = TextFormField(
+                          controller: _passPercentageController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Pass Percentage',
+                            prefixIcon: Icon(Icons.percent),
+                            hintText: '60',
+                          ),
+                          validator: (value) {
+                            if (value == null || value.isEmpty) {
+                              return 'Pass percentage is required';
+                            }
+                            final percentage = int.tryParse(value);
+                            if (percentage == null) {
+                              return 'Please enter a valid number';
+                            }
+                            if (percentage < 0 || percentage > 100) {
+                              return 'Percentage must be between 0 and 100';
+                            }
+                            return null;
+                          },
+                        );
+
+                        if (stacked) {
+                          return Column(
+                            children: [
+                              durationField,
+                              const SizedBox(height: 16),
+                              passField,
+                            ],
+                          );
+                        }
+
+                        return Row(
+                          children: [
+                            Expanded(child: durationField),
+                            const SizedBox(width: 16),
+                            Expanded(child: passField),
+                          ],
+                        );
+                      },
                     ),
-                    SizedBox(height: 16),
-                  ],
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<String>(
+                      initialValue: _selectedStatus,
+                      decoration: const InputDecoration(
+                        labelText: 'Initial Status',
+                        prefixIcon: Icon(Icons.flag_outlined),
+                        helperText:
+                            'Tests start as drafts. Publish after adding questions.',
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: 'draft', child: Text('Draft')),
+                      ],
+                      onChanged: _isLoading
+                          ? null
+                          : (value) {
+                              if (value == null) {
+                                return;
+                              }
 
-                  ElevatedButton(
-                    onPressed: _isLoading ? null : _handleCreateTest,
-                    child: Padding(
-                      padding: EdgeInsets.symmetric(vertical: 12),
+                              setState(() {
+                                _selectedStatus = value;
+                              });
+                            },
+                    ),
+                  ],
+                ),
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppTheme.errorColor.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+                    border: Border.all(
+                      color: AppTheme.errorColor.withOpacity(0.35),
+                    ),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(
+                        Icons.error_outline,
+                        color: AppTheme.errorColor,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          _error!,
+                          style: const TextStyle(color: AppTheme.errorColor),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _isLoading
+                          ? null
+                          : () => Navigator.of(context).pop(),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: _isLoading ? null : _handleCreateTest,
                       child: _isLoading
-                          ? SizedBox(
+                          ? const SizedBox(
                               height: 20,
                               width: 20,
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
-                          : Text('CREATE TEST'),
-                    ),
-                  ),
-                  SizedBox(height: 12),
-
-                  OutlinedButton(
-                    onPressed: _isLoading
-                        ? null
-                        : () => Navigator.of(context).pop(),
-                    child: Padding(
-                      padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Text('CANCEL'),
+                          : const Text('Create Test'),
                     ),
                   ),
                 ],
               ),
-            ),
+            ],
           ),
         ),
       ),
