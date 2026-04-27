@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:test_gorilla/core/api/api_client.dart';
+import 'package:test_gorilla/core/theme/app_theme.dart';
 import 'package:test_gorilla/features/shared/widgets/app_widgets.dart'
     as app_widgets;
 import 'package:test_gorilla/features/candidate/test_service.dart';
@@ -35,12 +36,9 @@ class _ResultScreenState extends State<ResultScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isMobile = MediaQuery.of(context).size.width < 600;
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Test Result'),
-        elevation: 0,
         automaticallyImplyLeading: false,
       ),
       body: FutureBuilder<Map<String, dynamic>>(
@@ -92,129 +90,163 @@ class _ResultScreenState extends State<ResultScreen> {
           );
           final isPassed = percentage >= passPercentage;
 
-          return SingleChildScrollView(
-            padding: EdgeInsets.all(isMobile ? 16 : 24),
+          return app_widgets.AppPageScaffold(
+            maxContentWidth: 900,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Result Card
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      children: [
-                        Container(
-                          width: 120,
-                          height: 120,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: isPassed ? Colors.green[50] : Colors.red[50],
-                            border: Border.all(
-                              color: isPassed ? Colors.green : Colors.red,
-                              width: 4,
+                app_widgets.GlassPanel(
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Final Score',
+                                  style: Theme.of(
+                                    context,
+                                  ).textTheme.titleMedium,
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  '${percentage.toStringAsFixed(1)}%',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .headlineLarge
+                                      ?.copyWith(
+                                        color: isPassed
+                                            ? AppTheme.successColor
+                                            : AppTheme.errorColor,
+                                      ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  'Score ${score.toStringAsFixed(0)} / ${totalMarks.toStringAsFixed(0)} marks',
+                                  style: Theme.of(context).textTheme.bodyMedium,
+                                ),
+                              ],
                             ),
                           ),
-                          child: Center(
-                            child: Text(
-                              '${percentage.toStringAsFixed(1)}%',
-                              style: TextStyle(
-                                fontSize: 32,
-                                fontWeight: FontWeight.bold,
-                                color: isPassed ? Colors.green : Colors.red,
-                              ),
-                            ),
+                          app_widgets.StatusBadge(
+                            label: isPassed ? 'PASS' : 'FAIL',
+                            status: isPassed ? 'success' : 'error',
                           ),
+                        ],
+                      ),
+                      const SizedBox(height: 18),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(999),
+                        child: LinearProgressIndicator(
+                          minHeight: 10,
+                          value: (percentage.clamp(0, 100)) / 100,
+                          color: isPassed
+                              ? AppTheme.successColor
+                              : AppTheme.errorColor,
+                          backgroundColor: const Color(0xFFE2E8F0),
                         ),
-                        const SizedBox(height: 24),
-                        Text(
-                          isPassed ? 'PASSED' : 'FAILED',
-                          style: TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                            color: isPassed ? Colors.green : Colors.red,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          'Score: ${score.toStringAsFixed(0)} / ${totalMarks.toStringAsFixed(0)} marks',
-                          style: Theme.of(context).textTheme.bodyLarge,
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 18),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final stacked = constraints.maxWidth < 700;
 
-                // Details
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    final summaryCards = [
+                      _SummaryMetricCard(
+                        title: 'Correct Answers',
+                        value: '${result['correct_count'] ?? 0}',
+                        color: AppTheme.successColor,
+                      ),
+                      _SummaryMetricCard(
+                        title: 'Wrong Answers',
+                        value: '${result['wrong_count'] ?? 0}',
+                        color: AppTheme.errorColor,
+                      ),
+                      _SummaryMetricCard(
+                        title: 'Pass Cutoff',
+                        value: '${passPercentage.toStringAsFixed(0)}%',
+                        color: AppTheme.warningColor,
+                      ),
+                    ];
+
+                    if (stacked) {
+                      return Column(
+                        children: summaryCards
+                            .map(
+                              (card) => Padding(
+                                padding: const EdgeInsets.only(bottom: 12),
+                                child: card,
+                              ),
+                            )
+                            .toList(),
+                      );
+                    }
+
+                    return Row(
                       children: [
-                        Text(
-                          'Summary',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 16),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text('Correct Answers:'),
-                            Text(
-                              '${result['correct_count'] ?? 0}',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text('Wrong Answers:'),
-                            Text(
-                              '${result['wrong_count'] ?? 0}',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text('Pass Percentage:'),
-                            Text(
-                              '${passPercentage.toStringAsFixed(0)}%',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
+                        Expanded(child: summaryCards[0]),
+                        const SizedBox(width: 12),
+                        Expanded(child: summaryCards[1]),
+                        const SizedBox(width: 12),
+                        Expanded(child: summaryCards[2]),
                       ],
-                    ),
-                  ),
+                    );
+                  },
                 ),
-                const SizedBox(height: 32),
-
-                // Actions
+                const SizedBox(height: 28),
                 ElevatedButton(
                   onPressed: () {
                     Navigator.of(context).popUntil((route) => route.isFirst);
                   },
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    child: const Text('BACK TO HOME'),
-                  ),
+                  child: const Text('Back To Home'),
                 ),
               ],
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _SummaryMetricCard extends StatelessWidget {
+  final String title;
+  final String value;
+  final Color color;
+
+  const _SummaryMetricCard({
+    required this.title,
+    required this.value,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return app_widgets.GlassPanel(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: const Color(0xFF64748B)),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
       ),
     );
   }

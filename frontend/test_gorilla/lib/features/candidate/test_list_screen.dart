@@ -8,8 +8,13 @@ import 'test_service.dart';
 
 class TestListScreen extends StatefulWidget {
   final bool embedded;
+  final VoidCallback? onAttemptFlowCompleted;
 
-  const TestListScreen({Key? key, this.embedded = false}) : super(key: key);
+  const TestListScreen({
+    Key? key,
+    this.embedded = false,
+    this.onAttemptFlowCompleted,
+  }) : super(key: key);
 
   @override
   State<TestListScreen> createState() => _TestListScreenState();
@@ -33,8 +38,6 @@ class _TestListScreenState extends State<TestListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isMobile = MediaQuery.of(context).size.width < 600;
-
     final content = FutureBuilder<List<Test>>(
       future: _testsFuture,
       builder: (context, snapshot) {
@@ -59,26 +62,52 @@ class _TestListScreenState extends State<TestListScreen> {
             .toList();
 
         if (publishedTests.isEmpty) {
-          return const app_widgets.EmptyStateWidget(
-            title: 'No Tests Available',
-            subtitle: 'Check back later for new tests',
-            icon: Icons.description_outlined,
+          return const app_widgets.AppPageScaffold(
+            child: app_widgets.EmptyStateWidget(
+              title: 'No Tests Available',
+              subtitle: 'Check back later for new tests',
+              icon: Icons.description_outlined,
+            ),
           );
         }
 
-        return SingleChildScrollView(
-          padding: EdgeInsets.all(isMobile ? 12 : 20),
+        return app_widgets.AppPageScaffold(
+          maxContentWidth: 980,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Available Tests (${publishedTests.length})',
-                style: Theme.of(context).textTheme.headlineSmall,
+              app_widgets.GlassPanel(
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Available Tests',
+                            style: Theme.of(context).textTheme.headlineSmall,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Pick a published assessment and start when you are ready.',
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(color: const Color(0xFF64748B)),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    app_widgets.StatusBadge(
+                      label: '${publishedTests.length} LIVE',
+                      status: 'published',
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 20),
               ...publishedTests.map((test) {
                 return Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.only(bottom: 14),
                   child: app_widgets.TestCard(
                     title: test.title,
                     description: test.description,
@@ -86,6 +115,11 @@ class _TestListScreenState extends State<TestListScreen> {
                     questions: test.totalQuestions,
                     status: test.status,
                     onTap: () {
+                      _startTest(test);
+                    },
+                    actionLabel: 'Start Test',
+                    actionIcon: Icons.play_arrow_rounded,
+                    onAction: () {
                       _startTest(test);
                     },
                   ),
@@ -102,12 +136,12 @@ class _TestListScreenState extends State<TestListScreen> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Available Tests'), elevation: 0),
+      appBar: AppBar(title: const Text('Available Tests')),
       body: content,
     );
   }
 
-  void _startTest(Test test) {
+  Future<void> _startTest(Test test) async {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -131,11 +165,18 @@ class _TestListScreenState extends State<TestListScreen> {
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(context);
-              Navigator.of(
+              await Navigator.of(
                 context,
               ).pushNamed('/candidate/attempt', arguments: test);
+
+              if (mounted) {
+                setState(() {
+                  _loadTests();
+                });
+                widget.onAttemptFlowCompleted?.call();
+              }
             },
             child: const Text('Start'),
           ),
