@@ -24,6 +24,10 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _handleLogin() async {
+    if (context.read<AuthProvider>().isLoading) {
+      return;
+    }
+
     if (_formKey.currentState!.validate()) {
       final authProvider = context.read<AuthProvider>();
 
@@ -83,6 +87,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         TextFormField(
                           controller: _emailController,
                           keyboardType: TextInputType.emailAddress,
+                          textInputAction: TextInputAction.next,
                           decoration: InputDecoration(
                             labelText: 'Email',
                             prefixIcon: Icon(Icons.email_outlined),
@@ -106,6 +111,8 @@ class _LoginScreenState extends State<LoginScreen> {
                         TextFormField(
                           controller: _passwordController,
                           obscureText: _obscurePassword,
+                          textInputAction: TextInputAction.done,
+                          onFieldSubmitted: (_) => _handleLogin(),
                           decoration: InputDecoration(
                             labelText: 'Password',
                             prefixIcon: Icon(Icons.lock_outlined),
@@ -213,8 +220,8 @@ class _LoginScreenState extends State<LoginScreen> {
                           style: TextStyle(fontWeight: FontWeight.bold),
                         ),
                         SizedBox(height: 8),
-                        Text('Admin: admin@test.com / password'),
-                        Text('Candidate: candidate@test.com / password'),
+                        Text('Admin: test2@example.com / 123456'),
+                        Text('Candidate: test1@example.com / 123456'),
                       ],
                     ),
                   ),
