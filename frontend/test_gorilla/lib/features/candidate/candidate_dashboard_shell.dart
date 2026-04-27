@@ -22,13 +22,23 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
   late TestService _testService;
   late Future<List<_CandidateAttemptSummary>> _historyFuture;
   String? _selectedAttemptId;
+  bool _isHistoryPanelExpanded = true;
 
   @override
   void initState() {
     super.initState();
     final apiClient = context.read<ApiClient>();
     _testService = TestService(apiClient);
-    _historyFuture = _loadHistory();
+    _refreshHistory(resetSelection: true);
+  }
+
+  void _refreshHistory({bool resetSelection = false}) {
+    setState(() {
+      if (resetSelection) {
+        _selectedAttemptId = null;
+      }
+      _historyFuture = _loadHistory();
+    });
   }
 
   Future<List<_CandidateAttemptSummary>> _loadHistory() async {
@@ -52,7 +62,9 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
         normalizedStatus == 'draft') {
       return _CandidateAttemptSummary(
         attempt: attempt,
-        testTitle: 'Test ${attempt.testId}',
+        testTitle: attempt.testTitle?.trim().isNotEmpty == true
+            ? attempt.testTitle!.trim()
+            : 'Test ${attempt.testId}',
         statusLabel: _formatStatusLabel(attempt.status),
         completedAt: attempt.endTime ?? attempt.updatedAt,
       );
@@ -79,7 +91,10 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
 
       return _CandidateAttemptSummary(
         attempt: attempt,
-        testTitle: test['title']?.toString() ?? 'Test ${attempt.testId}',
+        testTitle:
+            test['title']?.toString() ??
+            attempt.testTitle?.toString() ??
+            'Test ${attempt.testId}',
         statusLabel: isPassed ? 'Passed' : 'Failed',
         percentage: percentage,
         totalMarks: _toDouble(result['total_marks']),
@@ -94,7 +109,9 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
     } catch (_) {
       return _CandidateAttemptSummary(
         attempt: attempt,
-        testTitle: 'Test ${attempt.testId}',
+        testTitle: attempt.testTitle?.trim().isNotEmpty == true
+            ? attempt.testTitle!.trim()
+            : 'Test ${attempt.testId}',
         statusLabel: _formatStatusLabel(attempt.status),
         completedAt: attempt.endTime ?? attempt.updatedAt,
       );
@@ -173,8 +190,19 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
         '${twoDigits(local.hour)}:${twoDigits(local.minute)}';
   }
 
-  void _openResult(String attemptId) {
-    Navigator.of(context).pushNamed('/candidate/result', arguments: attemptId);
+  Future<void> _openResult(String attemptId) async {
+    await Navigator.of(
+      context,
+    ).pushNamed('/candidate/result', arguments: attemptId);
+    if (mounted) {
+      _refreshHistory();
+    }
+  }
+
+  void _toggleHistoryPanel() {
+    setState(() {
+      _isHistoryPanelExpanded = !_isHistoryPanelExpanded;
+    });
   }
 
   void _showLogout(BuildContext context) {
@@ -248,6 +276,7 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
                         });
                       },
                       onOpenResult: _openResult,
+                      onRefresh: _refreshHistory,
                       formatDateTime: _formatDateTime,
                     ),
                   ),
@@ -256,35 +285,52 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
             child: isWideLayout
                 ? Row(
                     children: [
-                      SizedBox(
-                        width: 360,
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 220),
+                        curve: Curves.easeOutCubic,
+                        width: _isHistoryPanelExpanded ? 360 : 72,
                         child: Material(
                           color: Theme.of(context).colorScheme.surface,
-                          child: _HistorySidebar(
-                            historyFuture: _historyFuture,
-                            selectedAttemptId: _selectedAttemptId,
-                            onSelectAttempt: (attemptId) {
-                              setState(() {
-                                _selectedAttemptId = attemptId;
-                              });
-                            },
-                            onOpenResult: _openResult,
-                            formatDateTime: _formatDateTime,
-                          ),
+                          child: _isHistoryPanelExpanded
+                              ? _HistorySidebar(
+                                  historyFuture: _historyFuture,
+                                  selectedAttemptId: _selectedAttemptId,
+                                  onSelectAttempt: (attemptId) {
+                                    setState(() {
+                                      _selectedAttemptId = attemptId;
+                                    });
+                                  },
+                                  onOpenResult: _openResult,
+                                  onRefresh: _refreshHistory,
+                                  formatDateTime: _formatDateTime,
+                                  onCollapse: _toggleHistoryPanel,
+                                  showCollapseButton: true,
+                                )
+                              : _CollapsedHistoryRail(
+                                  historyFuture: _historyFuture,
+                                  onExpand: _toggleHistoryPanel,
+                                  onRefresh: _refreshHistory,
+                                ),
                         ),
                       ),
                       const VerticalDivider(width: 1),
-                      const Expanded(
+                      Expanded(
                         child: Padding(
-                          padding: EdgeInsets.all(24),
-                          child: TestListScreen(embedded: true),
+                          padding: const EdgeInsets.all(24),
+                          child: TestListScreen(
+                            embedded: true,
+                            onAttemptFlowCompleted: () => _refreshHistory(),
+                          ),
                         ),
                       ),
                     ],
                   )
-                : const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: TestListScreen(embedded: true),
+                : Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: TestListScreen(
+                      embedded: true,
+                      onAttemptFlowCompleted: () => _refreshHistory(),
+                    ),
                   ),
           ),
         );
@@ -297,15 +343,21 @@ class _HistorySidebar extends StatelessWidget {
   final Future<List<_CandidateAttemptSummary>> historyFuture;
   final String? selectedAttemptId;
   final ValueChanged<String> onSelectAttempt;
-  final ValueChanged<String> onOpenResult;
+  final Future<void> Function(String) onOpenResult;
+  final void Function({bool resetSelection}) onRefresh;
   final String Function(DateTime? value) formatDateTime;
+  final VoidCallback? onCollapse;
+  final bool showCollapseButton;
 
   const _HistorySidebar({
     required this.historyFuture,
     required this.selectedAttemptId,
     required this.onSelectAttempt,
     required this.onOpenResult,
+    required this.onRefresh,
     required this.formatDateTime,
+    this.onCollapse,
+    this.showCollapseButton = false,
   });
 
   Color _statusColor(_CandidateAttemptSummary summary, BuildContext context) {
@@ -326,7 +378,7 @@ class _HistorySidebar extends StatelessWidget {
         if (snapshot.hasError) {
           return app_widgets.ErrorWidget(
             message: snapshot.error.toString(),
-            onRetry: null,
+            onRetry: () => onRefresh(),
           );
         }
 
@@ -358,7 +410,27 @@ class _HistorySidebar extends StatelessWidget {
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            Text('Test History', style: Theme.of(context).textTheme.titleLarge),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Test History',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => onRefresh(),
+                  tooltip: 'Refresh history',
+                  icon: const Icon(Icons.refresh),
+                ),
+                if (showCollapseButton)
+                  IconButton(
+                    onPressed: onCollapse,
+                    tooltip: 'Collapse history panel',
+                    icon: const Icon(Icons.keyboard_double_arrow_left),
+                  ),
+              ],
+            ),
             const SizedBox(height: 8),
             Text(
               'Track recent attempts and open the detailed result view.',
@@ -585,6 +657,68 @@ class _StatPill extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _CollapsedHistoryRail extends StatelessWidget {
+  final Future<List<_CandidateAttemptSummary>> historyFuture;
+  final VoidCallback onExpand;
+  final void Function({bool resetSelection}) onRefresh;
+
+  const _CollapsedHistoryRail({
+    required this.historyFuture,
+    required this.onExpand,
+    required this.onRefresh,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<_CandidateAttemptSummary>>(
+      future: historyFuture,
+      builder: (context, snapshot) {
+        final count = snapshot.data?.length ?? 0;
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+          child: Column(
+            children: [
+              IconButton(
+                onPressed: onExpand,
+                tooltip: 'Expand history panel',
+                icon: const Icon(Icons.keyboard_double_arrow_right),
+              ),
+              const SizedBox(height: 8),
+              CircleAvatar(
+                radius: 20,
+                backgroundColor: Theme.of(
+                  context,
+                ).colorScheme.primary.withOpacity(0.12),
+                child: Text(
+                  '$count',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.primary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              RotatedBox(
+                quarterTurns: 3,
+                child: Text(
+                  'History',
+                  style: Theme.of(context).textTheme.labelSmall,
+                ),
+              ),
+              const Spacer(),
+              IconButton(
+                onPressed: () => onRefresh(),
+                tooltip: 'Refresh history',
+                icon: const Icon(Icons.refresh),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

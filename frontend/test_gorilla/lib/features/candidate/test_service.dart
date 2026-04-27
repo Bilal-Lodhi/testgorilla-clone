@@ -102,11 +102,20 @@ class TestService {
   Future<List<TestAttempt>> getCandidateAttempts() async {
     try {
       final response = await apiClient.get(ApiConstants.candidateAttempts);
-      if (response['data'] is List) {
-        return (response['data'] as List)
+      final data = response['data'];
+
+      if (data is List) {
+        return data
             .map((a) => TestAttempt.fromJson(a as Map<String, dynamic>))
             .toList();
       }
+
+      if (data is Map && data['attempts'] is List) {
+        return (data['attempts'] as List)
+            .map((a) => TestAttempt.fromJson(a as Map<String, dynamic>))
+            .toList();
+      }
+
       return [];
     } catch (e) {
       rethrow;

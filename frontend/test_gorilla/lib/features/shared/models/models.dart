@@ -184,6 +184,7 @@ class TestAttempt {
   final String id;
   final String testId;
   final String userId;
+  final String? testTitle;
   final DateTime startTime;
   final DateTime? endTime;
   final String status;
@@ -195,6 +196,7 @@ class TestAttempt {
     required this.id,
     required this.testId,
     required this.userId,
+    this.testTitle,
     required this.startTime,
     this.endTime,
     required this.status,
@@ -208,6 +210,7 @@ class TestAttempt {
       id: json['id'] ?? '',
       testId: json['test_id'] ?? '',
       userId: json['user_id'] ?? '',
+      testTitle: json['test_title']?.toString(),
       startTime: DateTime.parse(
         json['start_time'] ?? DateTime.now().toString(),
       ),
@@ -229,6 +232,7 @@ class TestAttempt {
     'id': id,
     'test_id': testId,
     'user_id': userId,
+    'test_title': testTitle,
     'start_time': startTime.toIso8601String(),
     'end_time': endTime?.toIso8601String(),
     'status': status,
