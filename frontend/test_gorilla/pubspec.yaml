@@ -37,6 +37,8 @@ dependencies:
   provider: ^6.0.0
   http: ^1.1.0
   shared_preferences: ^2.0.0
+  audioplayers: ^5.2.1
+  flutter_ringtone_player: ^4.0.0+4
 
 dev_dependencies:
   flutter_test:
@@ -90,3 +92,6 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+  assets:
+    - lib/core/utils/tenseconds.mp3
