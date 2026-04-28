@@ -291,8 +291,10 @@ class TestCard extends StatelessWidget {
   final int duration;
   final int questions;
   final String status;
+  final Color? highlightColor;
   final VoidCallback onTap;
   final String? actionLabel;
+  final bool actionEnabled;
   final IconData? actionIcon;
   final VoidCallback? onAction;
   final String? destructiveActionLabel;
@@ -305,8 +307,10 @@ class TestCard extends StatelessWidget {
     required this.duration,
     required this.questions,
     required this.status,
+    this.highlightColor,
     required this.onTap,
     this.actionLabel,
+    this.actionEnabled = true,
     this.actionIcon,
     this.onAction,
     this.destructiveActionLabel,
@@ -318,8 +322,24 @@ class TestCard extends StatelessWidget {
     final muted = Theme.of(
       context,
     ).textTheme.bodySmall?.copyWith(color: const Color(0xFF64748B));
+    final baseCardColor = Theme.of(context).cardColor;
+    final cardColor = highlightColor == null
+        ? baseCardColor
+        : Color.alphaBlend(highlightColor!.withOpacity(0.08), baseCardColor);
+    final borderColor = highlightColor == null
+        ? const Color(0xFFE2E8F0)
+        : highlightColor!.withOpacity(0.32);
 
     return Card(
+      color: cardColor,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+        side: BorderSide(
+          color: borderColor,
+          width: highlightColor == null ? 1 : 1.2,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(AppTheme.radiusLg),
@@ -366,16 +386,16 @@ class TestCard extends StatelessWidget {
                   ),
                 ],
               ),
-              if ((actionLabel != null && onAction != null) ||
+              if (actionLabel != null ||
                   (destructiveActionLabel != null &&
                       onDestructiveAction != null)) ...[
                 const SizedBox(height: 16),
                 Row(
                   children: [
-                    if (actionLabel != null && onAction != null)
+                    if (actionLabel != null)
                       Expanded(
                         child: ElevatedButton.icon(
-                          onPressed: onAction,
+                          onPressed: actionEnabled ? onAction : null,
                           icon: Icon(
                             actionIcon ??
                                 (status == 'draft'
@@ -386,7 +406,9 @@ class TestCard extends StatelessWidget {
                           label: Text(actionLabel!),
                         ),
                       ),
-                    if (actionLabel != null && onAction != null)
+                    if (actionLabel != null &&
+                        destructiveActionLabel != null &&
+                        onDestructiveAction != null)
                       const SizedBox(width: 10),
                     if (destructiveActionLabel != null &&
                         onDestructiveAction != null)
