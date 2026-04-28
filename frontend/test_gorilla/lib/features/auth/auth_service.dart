@@ -99,4 +99,10 @@ class AuthService {
   Map<String, dynamic>? getUserData() {
     return JwtStorage.getUser();
   }
+
+  /// Delete account
+  Future<Map<String, dynamic>> deleteAccount() async {
+    final response = await apiClient.delete('/auth/account');
+    return response as Map<String, dynamic>;
+  }
 }
