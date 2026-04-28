@@ -374,6 +374,40 @@ class _AttemptScreenState extends State<AttemptScreen> {
     }
   }
 
+  Future<void> _confirmSubmitAttempt({Question? currentQuestion}) async {
+    if (_isLoading || _isSubmittingResponse || _currentAttempt == null) {
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Submit Test?'),
+          content: const Text(
+            'Are you sure you want to submit this test? You will not be able to change your answers after submitting.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Submit'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
+    await _submitAttempt(currentQuestion: currentQuestion);
+  }
+
   int _getLowTimerWarningSeconds() {
     final totalMinutes = widget.test.durationMinutes;
 
@@ -802,7 +836,7 @@ class _AttemptScreenState extends State<AttemptScreen> {
                                   onPressed:
                                       (_isLoading || _isSubmittingResponse)
                                       ? null
-                                      : () => _submitAttempt(
+                                      : () => _confirmSubmitAttempt(
                                           currentQuestion: currentQuestion,
                                         ),
                                   child: _isLoading
