@@ -85,6 +85,8 @@ const submitResponse = async (req, res, next) => {
       selectedOptionId,
       selected_option_id,
       codeAnswer,
+      writtenAnswer,
+      answer,
     } = req.body;
 
     // Validate input
@@ -108,13 +110,57 @@ const submitResponse = async (req, res, next) => {
       attemptId,
       questionId,
       selected_option ?? selectedOptionId ?? selected_option_id ?? null,
-      codeAnswer || null
+      codeAnswer ?? writtenAnswer ?? answer ?? null
     );
 
     res.status(HTTP_STATUS.CREATED).json({
       success: true,
       message: 'Response submitted successfully',
       data: { response },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Review a coding or essay response
+ * PATCH /api/v1/attempts/:attemptId/responses/:responseId/review
+ * Admin only
+ */
+const reviewResponse = async (req, res, next) => {
+  try {
+    if (req.user.role !== 'admin') {
+      throw new ApiError(
+        HTTP_STATUS.FORBIDDEN,
+        'Only admins can review responses'
+      );
+    }
+
+    const { attemptId, responseId } = req.params;
+    const { marksObtained, reviewNotes } = req.body;
+
+    if (marksObtained === undefined || marksObtained === null) {
+      throw new ApiError(
+        HTTP_STATUS.BAD_REQUEST,
+        'marksObtained is required'
+      );
+    }
+
+    const result = await attemptService.reviewResponse(
+      attemptId,
+      responseId,
+      marksObtained,
+      req.user.id,
+      reviewNotes || null
+    );
+
+    res.status(HTTP_STATUS.OK).json({
+      success: true,
+      message: result.refreshedResult
+        ? 'Response reviewed and result refreshed successfully'
+        : 'Response reviewed successfully',
+      data: result,
     });
   } catch (error) {
     next(error);
@@ -207,11 +253,39 @@ const getTestAttempts = async (req, res, next) => {
   }
 };
 
+/**
+ * Get all pending coding/essay evaluations
+ * GET /api/v1/attempts/pending-evaluations
+ * Admin only
+ */
+const getPendingEvaluations = async (req, res, next) => {
+  try {
+    if (req.user.role !== 'admin') {
+      throw new ApiError(
+        HTTP_STATUS.FORBIDDEN,
+        'Only admins can access pending evaluations'
+      );
+    }
+
+    const data = await attemptService.getPendingEvaluations();
+
+    res.status(HTTP_STATUS.OK).json({
+      success: true,
+      message: 'Pending evaluations retrieved successfully',
+      data,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   startAttempt,
   getAttempt,
   submitResponse,
+  reviewResponse,
   submitAttempt,
   getCandidateAttempts,
   getTestAttempts,
+  getPendingEvaluations,
 };
