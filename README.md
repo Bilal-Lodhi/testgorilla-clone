@@ -237,6 +237,8 @@ cp .env.example .env
 
 **Quick Start Config:**
 
+> Security note: Never commit real credentials or secrets to GitHub. Keep actual values only in local `.env` files and use placeholders in documentation.
+
 ```env
 # .env
 NODE_ENV=development
@@ -246,15 +248,15 @@ PORT=5000
 DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=testgorilla
-DB_USER=postgres
-DB_PASSWORD=postgres
+DB_USER=<your_db_user>
+DB_PASSWORD=<your_db_password>
 
 # JWT
-JWT_SECRET=your-secret-key-change-in-production
+JWT_SECRET=<generate-a-long-random-secret>
 JWT_EXPIRY=24h
 
 # CORS
-CORS_ORIGIN=http://localhost:3000
+CORS_ORIGIN=<allowed-origin-url>
 
 # Logging
 LOG_LEVEL=debug
@@ -1094,19 +1096,19 @@ PORT=5000
 DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=testgorilla
-DB_USER=postgres
+DB_USER=<your_db_user>
 DB_PASSWORD=<secure-password>
 DB_POOL_MIN=2
 DB_POOL_MAX=10
 
 # JWT Authentication
-JWT_SECRET=your-secret-key-minimum-32-characters
+JWT_SECRET=<generate-a-long-random-secret-min-32-chars>
 JWT_EXPIRY=24h
 REFRESH_TOKEN_EXPIRY=7d
 BCRYPT_SALT_ROUNDS=10
 
 # CORS
-CORS_ORIGIN=http://localhost:3000,http://localhost:8080
+CORS_ORIGIN=<allowed-origin-1>,<allowed-origin-2>
 
 # Logging
 LOG_LEVEL=debug|info|warn|error
