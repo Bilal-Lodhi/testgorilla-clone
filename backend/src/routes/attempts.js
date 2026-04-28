@@ -7,6 +7,17 @@ const { checkActiveAttempt, verifyAttemptOwnership, preventMultipleAttempts } = 
 const router = express.Router({ mergeParams: true });
 
 /**
+ * GET /api/v1/attempts/pending-evaluations
+ * Get all pending coding/essay evaluations (Admin only)
+ */
+router.get(
+  '/pending-evaluations',
+  authenticateToken,
+  adminOnly,
+  asyncHandler(attemptController.getPendingEvaluations)
+);
+
+/**
  * POST /api/v1/tests/:testId/attempts
  * Start a test attempt (Candidate only)
  * Mounted with mergeParams to inherit :testId from parent route
@@ -41,6 +52,17 @@ router.post(
   candidateOnly,
   checkActiveAttempt,
   asyncHandler(attemptController.submitResponse)
+);
+
+/**
+ * PATCH /api/v1/attempts/:attemptId/responses/:responseId/review
+ * Review a coding or essay response (Admin only)
+ */
+router.patch(
+  '/:attemptId/responses/:responseId/review',
+  authenticateToken,
+  adminOnly,
+  asyncHandler(attemptController.reviewResponse)
 );
 
 /**
