@@ -18,18 +18,335 @@ class AdminDashboardScreen extends StatefulWidget {
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   late ApiClient _apiClient;
   late Future<List<Test>> _testsFuture;
+  late Future<Map<String, dynamic>> _pendingEvaluationsFuture;
   bool _sidebarExpanded = true;
-  int _currentTab = 0; // 0: Dashboard, 1: Tests, 2: Analysis
+  int _currentTab = 0; // 0: Tests, 1: Analytics, 2: Pending Evaluations
+  int _pendingResponsesCount = 0;
 
   @override
   void initState() {
     super.initState();
     _apiClient = context.read<ApiClient>();
     _loadTests();
+    _loadPendingEvaluations();
   }
 
   void _loadTests() {
     _testsFuture = _getTests();
+  }
+
+  Map<String, dynamic> _asMap(dynamic value) {
+    if (value is Map<String, dynamic>) {
+      return value;
+    }
+    if (value is Map) {
+      return Map<String, dynamic>.from(value);
+    }
+    return {};
+  }
+
+  int _asInt(dynamic value, {int fallback = 0}) {
+    if (value == null) return fallback;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value) ?? fallback;
+    return fallback;
+  }
+
+  void _loadPendingEvaluations() {
+    _pendingEvaluationsFuture = _getPendingEvaluations();
+  }
+
+  Future<Map<String, dynamic>> _getPendingEvaluations() async {
+    final response = await _apiClient.get(ApiConstants.pendingEvaluations);
+    final data = _asMap(response['data']);
+    final summary = _asMap(data['summary']);
+    final pendingCount = _asInt(summary['responses']);
+
+    if (mounted && pendingCount != _pendingResponsesCount) {
+      setState(() {
+        _pendingResponsesCount = pendingCount;
+      });
+    } else {
+      _pendingResponsesCount = pendingCount;
+    }
+
+    return data;
+  }
+
+  Future<void> _reviewResponse({
+    required String attemptId,
+    required String responseId,
+    required int maxMarks,
+  }) async {
+    final marksController = TextEditingController();
+    final notesController = TextEditingController();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Evaluate Answer'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Assign marks (0 to $maxMarks)'),
+              const SizedBox(height: 8),
+              TextField(
+                controller: marksController,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: const InputDecoration(
+                  hintText: 'Enter awarded marks',
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text('Review Notes (optional)'),
+              const SizedBox(height: 8),
+              TextField(
+                controller: notesController,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  hintText: 'Explain the grading decision...',
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Submit Evaluation'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) {
+      return;
+    }
+
+    final marksValue = double.tryParse(marksController.text.trim());
+    if (marksValue == null || marksValue < 0 || marksValue > maxMarks) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Marks must be between 0 and $maxMarks'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
+
+    await _apiClient.patch(
+      ApiConstants.reviewResponse(attemptId, responseId),
+      body: {
+        'marksObtained': marksValue,
+        if (notesController.text.trim().isNotEmpty)
+          'reviewNotes': notesController.text.trim(),
+      },
+    );
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Evaluation submitted successfully'),
+          backgroundColor: Colors.green,
+        ),
+      );
+      setState(() {
+        _loadPendingEvaluations();
+      });
+    }
+  }
+
+  Widget _buildPendingEvaluationsContent() {
+    return FutureBuilder<Map<String, dynamic>>(
+      future: _pendingEvaluationsFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const app_widgets.LoadingWidget(
+            message: 'Loading pending evaluations...',
+          );
+        }
+
+        if (snapshot.hasError) {
+          return app_widgets.ErrorWidget(
+            message: snapshot.error.toString(),
+            onRetry: () {
+              setState(() {
+                _loadPendingEvaluations();
+              });
+            },
+          );
+        }
+
+        final data = snapshot.data ?? {};
+        final pendingEvaluationsRaw = data['pendingEvaluations'];
+        final pendingEvaluations = pendingEvaluationsRaw is List
+            ? pendingEvaluationsRaw.map((item) => _asMap(item)).toList()
+            : <Map<String, dynamic>>[];
+
+        if (pendingEvaluations.isEmpty) {
+          return const app_widgets.EmptyStateWidget(
+            title: 'No Pending Evaluations',
+            subtitle: 'All coding/written answers have been reviewed.',
+            icon: Icons.fact_check_outlined,
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            app_widgets.GlassPanel(
+              child: Row(
+                children: [
+                  const Icon(Icons.rate_review_outlined, size: 26),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Pending Evaluations (${pendingEvaluations.length} attempts)',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: () {
+                      setState(() {
+                        _loadPendingEvaluations();
+                      });
+                    },
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Refresh'),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            ...pendingEvaluations.map((attempt) {
+              final responsesRaw = attempt['pendingResponses'];
+              final responses = responsesRaw is List
+                  ? responsesRaw.map((item) => _asMap(item)).toList()
+                  : <Map<String, dynamic>>[];
+
+              final submittedAt =
+                  attempt['submittedAt']?.toString() ?? 'Unknown';
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 14),
+                child: app_widgets.GlassPanel(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        attempt['testTitle']?.toString() ?? 'Untitled Test',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Candidate: ${attempt['candidateName'] ?? 'Unknown'} (${attempt['candidateEmail'] ?? 'N/A'})',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Submitted at: $submittedAt | Pending answers: ${attempt['pendingCount'] ?? responses.length}',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFF64748B),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      ...responses.map((response) {
+                        final questionMarks = _asInt(response['questionMarks']);
+
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(
+                              AppTheme.radiusMd,
+                            ),
+                            color: const Color(0xFFF8FAFC),
+                            border: Border.all(color: const Color(0xFFE2E8F0)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      response['questionText']?.toString() ??
+                                          'Question',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleSmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                    ),
+                                  ),
+                                  app_widgets.StatusBadge(
+                                    label:
+                                        '${response['questionType'] ?? 'coding'} | $questionMarks marks',
+                                    status: 'pending',
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(
+                                    color: const Color(0xFFE2E8F0),
+                                  ),
+                                ),
+                                child: SelectableText(
+                                  response['answer']
+                                              ?.toString()
+                                              .trim()
+                                              .isNotEmpty ==
+                                          true
+                                      ? response['answer'].toString()
+                                      : 'No answer submitted',
+                                  style: Theme.of(context).textTheme.bodyMedium,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: ElevatedButton.icon(
+                                  onPressed: () => _reviewResponse(
+                                    attemptId: attempt['attemptId'].toString(),
+                                    responseId: response['responseId']
+                                        .toString(),
+                                    maxMarks: questionMarks,
+                                  ),
+                                  icon: const Icon(Icons.task_alt),
+                                  label: const Text('Evaluate'),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                    ],
+                  ),
+                ),
+              );
+            }),
+          ],
+        );
+      },
+    );
   }
 
   Future<List<Test>> _getTests() async {
@@ -168,6 +485,43 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               }
             },
             child: const Text('Logout'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showDeleteAccountDialog() {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete Account'),
+        content: const Text(
+          '⚠️ WARNING: This will permanently delete your account and all associated data. This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () async {
+              try {
+                await _apiClient.delete('/auth/account');
+                if (mounted) {
+                  await context.read<AuthProvider>().logout();
+                  Navigator.pop(dialogContext);
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Error: ${e.toString()}')),
+                  );
+                }
+              }
+            },
+            child: const Text('Delete Account'),
           ),
         ],
       ),
@@ -341,6 +695,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       Text(
                         _currentTab == 0
                             ? 'Test Workspace'
+                            : _currentTab == 2
+                            ? 'Pending Evaluations'
                             : 'Analytics Dashboard',
                         style: Theme.of(context).textTheme.headlineSmall,
                       ),
@@ -348,6 +704,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       Text(
                         _currentTab == 0
                             ? 'Manage, publish, and organize your assessments in one place.'
+                            : _currentTab == 2
+                            ? 'Review coding/written answers waiting for manual evaluation.'
                             : 'View detailed analytics and statistics.',
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: const Color(0xFF64748B),
@@ -357,11 +715,22 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   ),
                 ),
                 const SizedBox(width: 16),
-                ElevatedButton.icon(
-                  onPressed: _createTest,
-                  icon: const Icon(Icons.add),
-                  label: const Text('Create Test'),
-                ),
+                if (_currentTab == 0)
+                  ElevatedButton.icon(
+                    onPressed: _createTest,
+                    icon: const Icon(Icons.add),
+                    label: const Text('Create Test'),
+                  )
+                else if (_currentTab == 2)
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      setState(() {
+                        _loadPendingEvaluations();
+                      });
+                    },
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Refresh Reviews'),
+                  ),
               ],
             ),
           ),
@@ -382,6 +751,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             ),
             const SizedBox(height: 16),
             testsView,
+          ] else if (_currentTab == 2) ...[
+            _buildPendingEvaluationsContent(),
           ] else ...[
             Center(
               child: Column(
@@ -482,6 +853,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               setState(() => _currentTab = 1);
                             },
                           ),
+                          const SizedBox(height: 10),
+                          _SidebarItem(
+                            icon: Icons.rate_review_outlined,
+                            label: 'Pending Reviews',
+                            selected: _currentTab == 2,
+                            expanded: _sidebarExpanded,
+                            badgeCount: _pendingResponsesCount,
+                            onTap: () {
+                              setState(() {
+                                _currentTab = 2;
+                                _loadPendingEvaluations();
+                              });
+                            },
+                          ),
                         ],
                       ),
                     ),
@@ -504,6 +889,112 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       ),
                     ),
                   ),
+                const Spacer(),
+                // Delete Account Button
+                if (_sidebarExpanded)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red[700],
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: _showDeleteAccountDialog,
+                      icon: const Icon(Icons.delete_outline, size: 18),
+                      label: const Text('Delete Account'),
+                    ),
+                  ),
+                const SizedBox(height: 12),
+                // Profile section at bottom
+                Consumer<AuthProvider>(
+                  builder: (context, authProvider, _) {
+                    final userName =
+                        authProvider.userData?['name']?.toString() ?? 'Admin';
+                    final userEmail =
+                        authProvider.userData?['email']?.toString() ?? '';
+
+                    return Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: _sidebarExpanded
+                          ? Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.08),
+                                borderRadius: BorderRadius.circular(
+                                  AppTheme.radiusMd,
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  CircleAvatar(
+                                    radius: 20,
+                                    backgroundColor: Colors.white.withOpacity(
+                                      0.2,
+                                    ),
+                                    child: Text(
+                                      userName.isNotEmpty
+                                          ? userName[0].toUpperCase()
+                                          : 'A',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          userName,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodyMedium
+                                              ?.copyWith(
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        Text(
+                                          userEmail,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall
+                                              ?.copyWith(color: Colors.white70),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : Center(
+                              child: CircleAvatar(
+                                radius: 20,
+                                backgroundColor: Colors.white.withOpacity(0.2),
+                                child: Text(
+                                  userName.isNotEmpty
+                                      ? userName[0].toUpperCase()
+                                      : 'A',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                              ),
+                            ),
+                    );
+                  },
+                ),
               ],
             ),
           ),
@@ -578,6 +1069,7 @@ class _SidebarItem extends StatelessWidget {
   final String label;
   final bool selected;
   final bool expanded;
+  final int? badgeCount;
   final VoidCallback? onTap;
 
   const _SidebarItem({
@@ -585,6 +1077,7 @@ class _SidebarItem extends StatelessWidget {
     required this.label,
     this.selected = false,
     required this.expanded,
+    this.badgeCount,
     this.onTap,
   });
 
@@ -619,6 +1112,25 @@ class _SidebarItem extends StatelessWidget {
                               ),
                         ),
                       ),
+                      if ((badgeCount ?? 0) > 0)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppTheme.warningColor,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            '${badgeCount ?? 0}',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
                     ],
                   )
                 : Center(child: Icon(icon, color: Colors.white70, size: 24)),
