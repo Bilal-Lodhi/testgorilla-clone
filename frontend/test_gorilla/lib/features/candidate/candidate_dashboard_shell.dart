@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:test_gorilla/core/api/api_client.dart';
+import 'package:test_gorilla/core/theme/app_theme.dart';
 import 'package:test_gorilla/features/auth/auth_provider.dart';
 import 'package:test_gorilla/features/candidate/test_list_screen.dart';
 import 'package:test_gorilla/features/candidate/test_service.dart';
@@ -22,7 +23,7 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
   late TestService _testService;
   late Future<List<_CandidateAttemptSummary>> _historyFuture;
   String? _selectedAttemptId;
-  bool _isHistoryPanelExpanded = true;
+  bool _isHistoryPanelExpanded = false;
 
   @override
   void initState() {
@@ -77,17 +78,32 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
 
       final resultPayload = _valueForKey(payload, 'result');
       final testPayload = _valueForKey(payload, 'test');
+      final breakdownPayload = _valueForKey(payload, 'breakdown');
       final result = _asStringMap(resultPayload);
       final test = _asStringMap(testPayload);
+      final breakdown = _asStringMap(breakdownPayload);
 
       final percentage = _toDouble(
         result['percentage'],
         fallback: _toDouble(result['obtained_marks']),
       );
       final passPercentage = _toDouble(test['pass_percentage'], fallback: 60);
-      final isPassed = result['is_passed'] is bool
-          ? result['is_passed'] as bool
-          : percentage >= passPercentage;
+      final pendingManualCount = _toInt(breakdown['pending_manual_count']) ?? 0;
+      final totalMcqQuestions = _toInt(breakdown['total_mcq_questions']) ?? 0;
+      final totalQuestions = _toInt(breakdown['total_questions']) ?? 0;
+      final totalMcqMarks = _toDouble(breakdown['total_mcq_marks']);
+      final obtainedMcqMarks = _toDouble(breakdown['obtained_mcq_marks']);
+      final hasPendingReview = pendingManualCount > 0;
+
+      final double displayedPercentage = hasPendingReview
+          ? (totalMcqMarks > 0 ? (obtainedMcqMarks / totalMcqMarks) * 100 : 0)
+          : percentage;
+
+      final isPassed = hasPendingReview
+          ? null
+          : (result['is_passed'] is bool
+                ? result['is_passed'] as bool
+                : percentage >= passPercentage);
 
       return _CandidateAttemptSummary(
         attempt: attempt,
@@ -95,12 +111,20 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
             test['title']?.toString() ??
             attempt.testTitle?.toString() ??
             'Test ${attempt.testId}',
-        statusLabel: isPassed ? 'Passed' : 'Failed',
-        percentage: percentage,
-        totalMarks: _toDouble(result['total_marks']),
-        correctCount: _toInt(result['correct_count']),
-        wrongCount: _toInt(result['wrong_count']),
+        statusLabel: hasPendingReview
+            ? 'Pending Review'
+            : (isPassed == true ? 'Passed' : 'Failed'),
+        percentage: displayedPercentage,
+        totalMarks: hasPendingReview
+            ? totalMcqMarks
+            : _toDouble(result['total_marks']),
+        correctCount: _toInt(breakdown['correct_mcq_count']),
+        wrongCount: _toInt(breakdown['wrong_mcq_count']),
         isPassed: isPassed,
+        hasPendingReview: hasPendingReview,
+        pendingManualCount: pendingManualCount,
+        totalMcqQuestions: totalMcqQuestions,
+        totalQuestions: totalQuestions,
         completedAt: _parseDateTime(
           result['created_at']?.toString() ??
               attempt.endTime?.toIso8601String(),
@@ -230,6 +254,43 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
     );
   }
 
+  void _showDeleteAccountDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete Account'),
+        content: const Text(
+          '⚠️ WARNING: This will permanently delete your account and all associated data. This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () async {
+              try {
+                await context.read<ApiClient>().delete('/auth/account');
+                if (context.mounted) {
+                  await context.read<AuthProvider>().logout();
+                  Navigator.pop(dialogContext);
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Error: ${e.toString()}')),
+                  );
+                }
+              }
+            },
+            child: const Text('Delete Account'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isWideLayout = MediaQuery.of(context).size.width >= 900;
@@ -257,6 +318,11 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
                   ),
             actions: [
               IconButton(
+                icon: const Icon(Icons.delete_outline),
+                onPressed: () => _showDeleteAccountDialog(context),
+                tooltip: 'Delete Account',
+              ),
+              IconButton(
                 icon: const Icon(Icons.logout),
                 onPressed: () => _showLogout(context),
                 tooltip: 'Logout',
@@ -278,6 +344,8 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
                       onOpenResult: _openResult,
                       onRefresh: _refreshHistory,
                       formatDateTime: _formatDateTime,
+                      onCollapse: () => Navigator.of(context).pop(),
+                      showCollapseButton: true,
                     ),
                   ),
                 ),
@@ -361,6 +429,7 @@ class _HistorySidebar extends StatelessWidget {
   });
 
   Color _statusColor(_CandidateAttemptSummary summary, BuildContext context) {
+    if (summary.hasPendingReview) return AppTheme.warningColor;
     if (summary.isPassed == true) return Colors.green;
     if (summary.isPassed == false) return Colors.red;
     return Theme.of(context).colorScheme.primary;
@@ -371,46 +440,44 @@ class _HistorySidebar extends StatelessWidget {
     return FutureBuilder<List<_CandidateAttemptSummary>>(
       future: historyFuture,
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const app_widgets.LoadingWidget(message: 'Loading history...');
-        }
-
-        if (snapshot.hasError) {
-          return app_widgets.ErrorWidget(
-            message: snapshot.error.toString(),
-            onRetry: () => onRefresh(),
-          );
-        }
-
         final history = snapshot.data ?? [];
+        final isLoading = snapshot.connectionState == ConnectionState.waiting;
+        final hasError = snapshot.hasError;
 
-        if (history.isEmpty) {
-          return const app_widgets.EmptyStateWidget(
-            title: 'No Test History',
-            subtitle: 'Your submitted attempts will appear here.',
-            icon: Icons.history_outlined,
-          );
-        }
+        // Build header that's always visible
+        final header = LayoutBuilder(
+          builder: (context, constraints) {
+            final actions = <Widget>[
+              IconButton(
+                onPressed: () => onRefresh(),
+                tooltip: 'Refresh history',
+                icon: const Icon(Icons.refresh),
+              ),
+              if (showCollapseButton)
+                IconButton(
+                  onPressed: onCollapse,
+                  tooltip: 'Collapse history panel',
+                  icon: const Icon(Icons.keyboard_double_arrow_left),
+                ),
+            ];
 
-        final selectedAttempt = selectedAttemptId == null
-            ? history.first
-            : history.firstWhere(
-                (item) => item.attempt.id == selectedAttemptId,
-                orElse: () => history.first,
+            if (constraints.maxWidth < 280) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Test History',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 4),
+                  Wrap(spacing: 4, runSpacing: 4, children: actions),
+                ],
               );
+            }
 
-        final totalAttempts = history.length;
-        final completedAttempts = history
-            .where((item) => item.isCompleted)
-            .length;
-        final passedAttempts = history
-            .where((item) => item.isPassed == true)
-            .length;
-
-        return ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            Row(
+            return Row(
               children: [
                 Expanded(
                   child: Text(
@@ -418,209 +485,278 @@ class _HistorySidebar extends StatelessWidget {
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                 ),
-                IconButton(
-                  onPressed: () => onRefresh(),
-                  tooltip: 'Refresh history',
-                  icon: const Icon(Icons.refresh),
-                ),
-                if (showCollapseButton)
-                  IconButton(
-                    onPressed: onCollapse,
-                    tooltip: 'Collapse history panel',
-                    icon: const Icon(Icons.keyboard_double_arrow_left),
-                  ),
+                ...actions,
               ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Track recent attempts and open the detailed result view.',
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: Colors.grey[600]),
-            ),
-            const SizedBox(height: 16),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        CircleAvatar(
-                          backgroundColor: _statusColor(
-                            selectedAttempt,
-                            context,
-                          ).withOpacity(0.12),
-                          child: Icon(
-                            selectedAttempt.isCompleted
-                                ? (selectedAttempt.isPassed == true
-                                      ? Icons.check_circle_outline
-                                      : Icons.cancel_outlined)
-                                : Icons.pending_outlined,
-                            color: _statusColor(selectedAttempt, context),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                selectedAttempt.testTitle,
-                                style: Theme.of(context).textTheme.titleMedium,
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                selectedAttempt.statusLabel,
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    Wrap(
-                      spacing: 12,
-                      runSpacing: 12,
-                      children: [
-                        _StatPill(label: 'Attempts', value: '$totalAttempts'),
-                        _StatPill(
-                          label: 'Completed',
-                          value: '$completedAttempts',
-                        ),
-                        _StatPill(label: 'Passed', value: '$passedAttempts'),
-                      ],
-                    ),
-                    if (selectedAttempt.isCompleted) ...[
-                      const SizedBox(height: 16),
-                      _DetailRow(
-                        label: 'Score',
-                        value: selectedAttempt.scoreText,
-                      ),
-                      const SizedBox(height: 8),
-                      _DetailRow(
-                        label: 'Result',
-                        value: selectedAttempt.resultText,
-                      ),
-                      const SizedBox(height: 8),
-                      _DetailRow(
-                        label: 'Submitted',
-                        value: formatDateTime(selectedAttempt.completedAt),
-                      ),
-                      if (selectedAttempt.correctCount != null ||
-                          selectedAttempt.wrongCount != null) ...[
-                        const SizedBox(height: 8),
-                        _DetailRow(
-                          label: 'Answers',
-                          value:
-                              '${selectedAttempt.correctCount ?? 0} correct / ${selectedAttempt.wrongCount ?? 0} wrong',
-                        ),
-                      ],
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          onPressed: () =>
-                              onOpenResult(selectedAttempt.attempt.id),
-                          icon: const Icon(Icons.open_in_new),
-                          label: const Text('Open Result'),
-                        ),
-                      ),
-                    ],
-                  ],
+            );
+          },
+        );
+
+        // Build content based on state
+        Widget content;
+        if (isLoading) {
+          content = const app_widgets.LoadingWidget(
+            message: 'Loading history...',
+          );
+        } else if (hasError) {
+          content = app_widgets.ErrorWidget(
+            message: snapshot.error.toString(),
+            onRetry: () => onRefresh(),
+          );
+        } else if (history.isEmpty) {
+          content = const app_widgets.EmptyStateWidget(
+            title: 'No Test History',
+            subtitle: 'Your submitted attempts will appear here.',
+            icon: Icons.history_outlined,
+          );
+        } else {
+          final selectedAttempt = selectedAttemptId == null
+              ? history.first
+              : history.firstWhere(
+                  (item) => item.attempt.id == selectedAttemptId,
+                  orElse: () => history.first,
+                );
+
+          final totalAttempts = history.length;
+          final completedAttempts = history
+              .where((item) => item.isCompleted)
+              .length;
+          final passedAttempts = history
+              .where((item) => item.isPassed == true)
+              .length;
+
+          content = _buildHistoryContent(
+            context,
+            history,
+            selectedAttempt,
+            totalAttempts,
+            completedAttempts,
+            passedAttempts,
+          );
+        }
+
+        return Column(
+          children: [
+            Padding(padding: const EdgeInsets.all(16), child: header),
+            Expanded(
+              child: SingleChildScrollView(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: content,
                 ),
               ),
             ),
-            const SizedBox(height: 20),
-            Text('History', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 12),
-            ...history.map((item) {
-              final isSelected =
-                  item.attempt.id == selectedAttemptId ||
-                  (selectedAttemptId == null &&
-                      identical(item, selectedAttempt));
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: InkWell(
-                  onTap: () => onSelectAttempt(item.attempt.id),
-                  borderRadius: BorderRadius.circular(16),
-                  child: Card(
-                    elevation: isSelected ? 3 : 1,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      side: BorderSide(
-                        color: isSelected
-                            ? Theme.of(context).colorScheme.primary
-                            : Colors.transparent,
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildHistoryContent(
+    BuildContext context,
+    List<_CandidateAttemptSummary> history,
+    _CandidateAttemptSummary selectedAttempt,
+    int totalAttempts,
+    int completedAttempts,
+    int passedAttempts,
+  ) {
+    return ListView(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      padding: EdgeInsets.zero,
+      children: [
+        const SizedBox(height: 8),
+        Text(
+          'Track recent attempts and open the detailed result view.',
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(color: Colors.grey[600]),
+        ),
+        const SizedBox(height: 16),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    CircleAvatar(
+                      backgroundColor: _statusColor(
+                        selectedAttempt,
+                        context,
+                      ).withOpacity(0.12),
+                      child: Icon(
+                        selectedAttempt.isCompleted
+                            ? (selectedAttempt.isPassed == true
+                                  ? Icons.check_circle_outline
+                                  : Icons.cancel_outlined)
+                            : Icons.pending_outlined,
+                        color: _statusColor(selectedAttempt, context),
                       ),
                     ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(14),
+                    const SizedBox(width: 12),
+                    Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  item.testTitle,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context).textTheme.titleSmall
-                                      ?.copyWith(fontWeight: FontWeight.w600),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 4,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: _statusColor(
-                                    item,
-                                    context,
-                                  ).withOpacity(0.12),
-                                  borderRadius: BorderRadius.circular(999),
-                                ),
-                                child: Text(
-                                  item.statusLabel,
-                                  style: TextStyle(
-                                    color: _statusColor(item, context),
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
                           Text(
-                            item.isCompleted
-                                ? item.resultText
-                                : 'Started ${formatDateTime(item.attempt.startTime)}',
+                            selectedAttempt.testTitle,
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            selectedAttempt.statusLabel,
                             style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            item.isCompleted
-                                ? 'Submitted ${formatDateTime(item.completedAt)}'
-                                : 'In progress',
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(color: Colors.grey[600]),
                           ),
                         ],
                       ),
                     ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    _StatPill(label: 'Attempts', value: '$totalAttempts'),
+                    _StatPill(label: 'Completed', value: '$completedAttempts'),
+                    _StatPill(label: 'Passed', value: '$passedAttempts'),
+                  ],
+                ),
+                if (selectedAttempt.isCompleted) ...[
+                  const SizedBox(height: 16),
+                  _DetailRow(label: 'Score', value: selectedAttempt.scoreText),
+                  const SizedBox(height: 8),
+                  _DetailRow(
+                    label: 'Result',
+                    value: selectedAttempt.resultText,
+                  ),
+                  if (selectedAttempt.hasPendingReview) ...[
+                    const SizedBox(height: 8),
+                    _DetailRow(
+                      label: 'Review Progress',
+                      value:
+                          '${selectedAttempt.totalMcqQuestions}/${selectedAttempt.totalQuestions} questions evaluated',
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  _DetailRow(
+                    label: 'Submitted',
+                    value: formatDateTime(selectedAttempt.completedAt),
+                  ),
+                  if (selectedAttempt.correctCount != null ||
+                      selectedAttempt.wrongCount != null) ...[
+                    const SizedBox(height: 8),
+                    _DetailRow(
+                      label: 'Answers',
+                      value:
+                          '${selectedAttempt.correctCount ?? 0} correct / ${selectedAttempt.wrongCount ?? 0} wrong',
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () => onOpenResult(selectedAttempt.attempt.id),
+                      icon: const Icon(Icons.open_in_new),
+                      label: const Text('Open Result'),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 20),
+        Text('History', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 12),
+        ...history.map((item) {
+          final isSelected =
+              item.attempt.id == selectedAttemptId ||
+              (selectedAttemptId == null && identical(item, selectedAttempt));
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: InkWell(
+              onTap: () => onSelectAttempt(item.attempt.id),
+              borderRadius: BorderRadius.circular(16),
+              child: Card(
+                elevation: isSelected ? 3 : 1,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  side: BorderSide(
+                    color: isSelected
+                        ? Theme.of(context).colorScheme.primary
+                        : Colors.transparent,
                   ),
                 ),
-              );
-            }),
-          ],
-        );
-      },
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              item.testTitle,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.titleSmall
+                                  ?.copyWith(fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: _statusColor(
+                                item,
+                                context,
+                              ).withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              item.statusLabel,
+                              style: TextStyle(
+                                color: _statusColor(item, context),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        item.isCompleted
+                            ? item.resultText
+                            : 'Started ${formatDateTime(item.attempt.startTime)}',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        item.isCompleted
+                            ? 'Submitted ${formatDateTime(item.completedAt)}'
+                            : 'In progress',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 16),
+          child: SizedBox.shrink(),
+        ),
+      ],
     );
   }
 }
@@ -732,15 +868,15 @@ class _DetailRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label),
-        const SizedBox(width: 16),
+        Flexible(child: Text(label, overflow: TextOverflow.ellipsis)),
+        const SizedBox(width: 12),
         Flexible(
           child: Text(
             value,
             textAlign: TextAlign.right,
+            overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontWeight: FontWeight.w600),
           ),
         ),
@@ -758,6 +894,10 @@ class _CandidateAttemptSummary {
   final int? correctCount;
   final int? wrongCount;
   final bool? isPassed;
+  final bool hasPendingReview;
+  final int pendingManualCount;
+  final int totalMcqQuestions;
+  final int totalQuestions;
   final DateTime? completedAt;
 
   const _CandidateAttemptSummary({
@@ -769,12 +909,20 @@ class _CandidateAttemptSummary {
     this.correctCount,
     this.wrongCount,
     this.isPassed,
+    this.hasPendingReview = false,
+    this.pendingManualCount = 0,
+    this.totalMcqQuestions = 0,
+    this.totalQuestions = 0,
     this.completedAt,
   });
 
   bool get isCompleted => isPassed != null || percentage != null;
 
   String get resultText {
+    if (hasPendingReview) {
+      return 'MCQ evaluated ($totalMcqQuestions/$totalQuestions). Pending manual review for $pendingManualCount question(s).';
+    }
+
     if (percentage == null) {
       return 'Result pending';
     }
@@ -787,6 +935,10 @@ class _CandidateAttemptSummary {
   }
 
   String get scoreText {
+    if (hasPendingReview && percentage != null) {
+      return 'MCQ ${percentage!.toStringAsFixed(1)}%';
+    }
+
     if (percentage == null) {
       return 'Pending';
     }
