@@ -135,4 +135,23 @@ class AuthProvider extends ChangeNotifier {
   bool isCandidate() {
     return _userRole == 'candidate';
   }
+
+  /// Delete account
+  Future<bool> deleteAccount() async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      await _authService.deleteAccount();
+      _isLoading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = _mapAuthError(e);
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
 }
