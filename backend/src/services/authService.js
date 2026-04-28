@@ -190,6 +190,8 @@ const verifyUserSession = async (userId) => {
   return await getUserById(userId);
 };
 
+
+
 module.exports = {
   registerUser,
   loginUser,
