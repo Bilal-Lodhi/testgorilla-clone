@@ -41,8 +41,11 @@ class ApiConstants {
   static String getAttempt(String attemptId) => '/attempts/$attemptId';
   static String submitResponse(String attemptId) =>
       '/attempts/$attemptId/responses';
+  static String reviewResponse(String attemptId, String responseId) =>
+      '/attempts/$attemptId/responses/$responseId/review';
   static String submitAttempt(String attemptId) =>
       '/attempts/$attemptId/submit';
+  static const String pendingEvaluations = '/attempts/pending-evaluations';
   static const String candidateAttempts = '/candidates/attempts';
   static String testAttempts(String testId) => '/tests/$testId/attempts';
 
