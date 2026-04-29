@@ -10,7 +10,7 @@
     "prefer_related_applications": false,
     "icons": [
         {
-            "src": "assets/assets/lib/core/utils/main.png",
+            "src": "icons/Icon-192.png",
             "sizes": "any",
             "type": "image/png",
             "purpose": "any"

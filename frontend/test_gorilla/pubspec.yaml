@@ -66,6 +66,7 @@ flutter:
   assets:
     - lib/core/utils/main.png
     - lib/core/utils/tenseconds.mp3
+    - assets/images/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
