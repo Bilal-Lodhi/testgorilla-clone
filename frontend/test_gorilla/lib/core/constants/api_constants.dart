@@ -3,32 +3,9 @@ import 'package:flutter/foundation.dart';
 class ApiConstants {
   static const String _apiPath = '/api/v1';
 
-  static const String _configuredBaseUrl = String.fromEnvironment(
-    'API_BASE_URL',
-    defaultValue: 'https://testgorilla-clone.onrender.com/api/v1',
-  );
-
-  static String get _host {
-    if (kIsWeb) {
-      return 'localhost';
-    }
-
-    switch (defaultTargetPlatform) {
-      case TargetPlatform.android:
-        // Android emulator maps host machine localhost to 10.0.2.2.
-        return '10.0.2.2';
-      default:
-        return 'localhost';
-    }
-  }
-
-  static String get baseUrl {
-    if (_configuredBaseUrl.isNotEmpty) {
-      return _configuredBaseUrl;
-    }
-
-    return 'http://$_host:5000$_apiPath';
-  }
+  /// Production-safe base URL from build-time environment variable
+  /// NO fallback values - must be provided via --dart-define=API_BASE_URL=...
+  static const String baseUrl = String.fromEnvironment('API_BASE_URL');
 
   // Auth endpoints
   static const String authRegister = '/auth/register';

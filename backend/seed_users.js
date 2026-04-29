@@ -1,7 +1,14 @@
 const http = require('http');
 const https = require('https');
 
-const apiBaseUrl = process.env.API_BASE_URL || 'https://testgorilla-clone.onrender.com/api/v1';
+// Production-safe: API_BASE_URL MUST be provided
+if (!process.env.API_BASE_URL) {
+  console.error('FATAL: API_BASE_URL environment variable is not set!');
+  console.error('Usage: API_BASE_URL=http://localhost:5000/api/v1 node seed_users.js');
+  process.exit(1);
+}
+
+const apiBaseUrl = process.env.API_BASE_URL;
 const apiUrl = new URL(apiBaseUrl);
 const client = apiUrl.protocol === 'https:' ? https : http;
 

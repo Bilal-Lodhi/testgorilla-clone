@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:test_gorilla/core/utils/jwt_storage.dart';
 import 'package:test_gorilla/core/api/api_client.dart';
 import 'package:test_gorilla/core/config/app_config.dart';
+import 'package:test_gorilla/core/config/config_validator.dart';
 import 'package:test_gorilla/core/theme/app_theme.dart';
 import 'package:test_gorilla/features/auth/auth_provider.dart';
 import 'package:test_gorilla/features/auth/login_screen.dart';
@@ -12,6 +13,9 @@ import 'package:test_gorilla/features/candidate/candidate_dashboard_shell.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Validate production-safe configuration
+  ConfigValidator.validate();
 
   // Initialize JWT storage
   await JwtStorage.init();

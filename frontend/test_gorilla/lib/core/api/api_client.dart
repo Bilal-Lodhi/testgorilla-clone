@@ -5,12 +5,12 @@ import 'package:test_gorilla/core/constants/api_constants.dart';
 import 'package:test_gorilla/core/utils/jwt_storage.dart';
 
 class ApiClient {
-  final String baseUrl;
+  static const String baseUrl = ApiConstants.baseUrl;
   late http.Client _httpClient;
   VoidCallback? _onUnauthorized;
   bool _isHandlingUnauthorized = false;
 
-  ApiClient({String? baseUrl}) : baseUrl = baseUrl ?? ApiConstants.baseUrl {
+  ApiClient() {
     _httpClient = http.Client();
   }
 
