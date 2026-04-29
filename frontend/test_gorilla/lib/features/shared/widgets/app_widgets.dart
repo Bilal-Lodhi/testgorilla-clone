@@ -346,6 +346,7 @@ class TestCard extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(18),
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
