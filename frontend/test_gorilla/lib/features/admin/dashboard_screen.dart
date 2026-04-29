@@ -534,7 +534,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       physics: const NeverScrollableScrollPhysics(),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: gridCount,
-        childAspectRatio: gridCount == 1 ? 1.95 : 1.35,
+        childAspectRatio: gridCount == 1 ? 1.55 : 1.28,
         crossAxisSpacing: 16,
         mainAxisSpacing: 16,
       ),
@@ -589,12 +589,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Test Workspace',
+                        _currentTab == 0
+                            ? 'Test Workspace'
+                            : _currentTab == 2
+                            ? 'Pending Evaluations'
+                            : 'Analytics Dashboard',
                         style: Theme.of(context).textTheme.headlineSmall,
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'Manage, publish, and organize your assessments in one place.',
+                        _currentTab == 0
+                            ? 'Manage, publish, and organize your assessments in one place.'
+                            : _currentTab == 2
+                            ? 'Review coding/written answers waiting for manual evaluation.'
+                            : 'View detailed analytics and statistics.',
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: const Color(0xFF64748B),
                         ),
@@ -603,30 +611,73 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   ),
                 ),
                 const SizedBox(width: 16),
-                ElevatedButton.icon(
-                  onPressed: _createTest,
-                  icon: const Icon(Icons.add),
-                  label: const Text('Create Test'),
-                ),
+                if (_currentTab == 0)
+                  ElevatedButton.icon(
+                    onPressed: _createTest,
+                    icon: const Icon(Icons.add),
+                    label: const Text('Create Test'),
+                  )
+                else if (_currentTab == 2)
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      setState(() {
+                        _loadPendingEvaluations();
+                      });
+                    },
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Refresh Reviews'),
+                  ),
               ],
             ),
           ),
           const SizedBox(height: 24),
-          Row(
-            children: [
-              Text(
-                'Created Tests',
-                style: Theme.of(context).textTheme.titleLarge,
+          if (_currentTab == 0) ...[
+            Row(
+              children: [
+                Text(
+                  'Created Tests',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(width: 10),
+                app_widgets.StatusBadge(
+                  label: '${tests.length} TOTAL',
+                  status: 'published',
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            testsView,
+          ] else if (_currentTab == 2) ...[
+            _buildPendingEvaluationsContent(),
+          ] else ...[
+            Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.bar_chart_outlined,
+                    size: 64,
+                    color: Colors.grey[300],
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Analytics Coming Soon',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.titleLarge?.copyWith(color: Colors.grey),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Detailed analytics and test statistics will be available soon.',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodyMedium?.copyWith(color: Colors.grey),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
               ),
-              const SizedBox(width: 10),
-              app_widgets.StatusBadge(
-                label: '${tests.length} TOTAL',
-                status: 'published',
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          testsView,
+            ),
+          ],
         ],
       ),
     );
@@ -1006,9 +1057,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isMobile = MediaQuery.of(context).size.width < 900;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Admin Dashboard'),
+        leading: isMobile
+            ? Builder(
+                builder: (context) => IconButton(
+                  icon: const Icon(Icons.menu),
+                  tooltip: 'Open navigation',
+                  onPressed: () => Scaffold.of(context).openDrawer(),
+                ),
+              )
+            : null,
         actions: [
           IconButton(
             onPressed: _showLogoutDialog,
@@ -1017,6 +1079,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           ),
         ],
       ),
+      drawer: MediaQuery.of(context).size.width < 900
+          ? _buildSidebarDrawer()
+          : null,
       body: FutureBuilder<List<Test>>(
         future: _testsFuture,
         builder: (context, snapshot) {
@@ -1035,7 +1100,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
           final tests = snapshot.data ?? [];
 
-          if (tests.isEmpty) {
+          if (tests.isEmpty && _currentTab == 0) {
             return app_widgets.AppPageScaffold(
               child: app_widgets.EmptyStateWidget(
                 title: 'No Tests Created',
@@ -1059,6 +1124,167 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             },
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildSidebarDrawer() {
+    return Drawer(
+      backgroundColor: const Color(0xFF0F172A),
+      child: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: Text(
+                'Test Gorilla',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: SingleChildScrollView(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _SidebarItem(
+                        icon: Icons.dashboard_outlined,
+                        label: 'Dashboard',
+                        selected: _currentTab == 0,
+                        expanded: true,
+                        onTap: () {
+                          setState(() => _currentTab = 0);
+                          Navigator.pop(context);
+                        },
+                      ),
+                      const SizedBox(height: 10),
+                      _SidebarItem(
+                        icon: Icons.analytics_outlined,
+                        label: 'Analytics',
+                        selected: _currentTab == 1,
+                        expanded: true,
+                        onTap: () {
+                          setState(() => _currentTab = 1);
+                          Navigator.pop(context);
+                        },
+                      ),
+                      const SizedBox(height: 10),
+                      _SidebarItem(
+                        icon: Icons.rate_review_outlined,
+                        label: 'Pending Reviews',
+                        selected: _currentTab == 2,
+                        expanded: true,
+                        badgeCount: _pendingResponsesCount,
+                        onTap: () {
+                          setState(() {
+                            _currentTab = 2;
+                            _loadPendingEvaluations();
+                          });
+                          Navigator.pop(context);
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            if (true)
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+                  ),
+                  child: Text(
+                    'Use Create Test to draft new assessments and publish once questions are ready.',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: Colors.white70),
+                  ),
+                ),
+              ),
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red[700],
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: _showDeleteAccountDialog,
+                icon: const Icon(Icons.delete_outline, size: 18),
+                label: const Text('Delete Account'),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Consumer<AuthProvider>(
+              builder: (context, authProvider, _) {
+                final userName =
+                    authProvider.userData?['name']?.toString() ?? 'Admin';
+                final userEmail =
+                    authProvider.userData?['email']?.toString() ?? '';
+
+                return Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+                    ),
+                    child: Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 20,
+                          backgroundColor: Colors.blue[700],
+                          child: Text(
+                            userName.isNotEmpty
+                                ? userName[0].toUpperCase()
+                                : 'A',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                userName,
+                                style: Theme.of(context).textTheme.bodyMedium
+                                    ?.copyWith(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(
+                                userEmail,
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(color: Colors.white70),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
