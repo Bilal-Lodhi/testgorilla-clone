@@ -4,7 +4,6 @@ import 'package:test_gorilla/core/utils/jwt_storage.dart';
 import 'package:test_gorilla/core/api/api_client.dart';
 import 'package:test_gorilla/core/config/app_config.dart';
 import 'package:test_gorilla/core/theme/app_theme.dart';
-import 'package:test_gorilla/core/widgets/splash_screen.dart';
 import 'package:test_gorilla/features/auth/auth_provider.dart';
 import 'package:test_gorilla/features/auth/login_screen.dart';
 import 'package:test_gorilla/features/navigation/app_router.dart';
@@ -26,6 +25,8 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final apiClient = ApiClient();
+    final authProvider = AuthProvider(apiClient);
+    apiClient.setUnauthorizedHandler(authProvider.handleSessionExpired);
 
     return MultiProvider(
       providers: [
@@ -33,7 +34,7 @@ class MyApp extends StatelessWidget {
         Provider<ApiClient>(create: (_) => apiClient),
 
         // Auth Provider
-        ChangeNotifierProvider(create: (_) => AuthProvider(apiClient)),
+        ChangeNotifierProvider(create: (_) => authProvider),
       ],
       child: MaterialApp(
         title: AppConfig.appName,

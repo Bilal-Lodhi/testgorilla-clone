@@ -7,9 +7,15 @@ import 'package:test_gorilla/core/utils/jwt_storage.dart';
 class ApiClient {
   final String baseUrl;
   late http.Client _httpClient;
+  VoidCallback? _onUnauthorized;
+  bool _isHandlingUnauthorized = false;
 
   ApiClient({String? baseUrl}) : baseUrl = baseUrl ?? ApiConstants.baseUrl {
     _httpClient = http.Client();
+  }
+
+  void setUnauthorizedHandler(VoidCallback handler) {
+    _onUnauthorized = handler;
   }
 
   /// Log debug message
@@ -49,7 +55,10 @@ class ApiClient {
             onTimeout: () => throw TimeoutException('Request timeout'),
           );
 
-      return _handleResponse(response);
+      return await _handleResponse(
+        response,
+        hadAuthToken: headers.containsKey('Authorization'),
+      );
     } catch (e) {
       _log('GET Error: $e');
       rethrow;
@@ -77,7 +86,10 @@ class ApiClient {
             onTimeout: () => throw TimeoutException('Request timeout'),
           );
 
-      return _handleResponse(response);
+      return await _handleResponse(
+        response,
+        hadAuthToken: requestHeaders.containsKey('Authorization'),
+      );
     } catch (e) {
       _log('POST Error: $e');
       rethrow;
@@ -105,7 +117,10 @@ class ApiClient {
             onTimeout: () => throw TimeoutException('Request timeout'),
           );
 
-      return _handleResponse(response);
+      return await _handleResponse(
+        response,
+        hadAuthToken: requestHeaders.containsKey('Authorization'),
+      );
     } catch (e) {
       _log('PUT Error: $e');
       rethrow;
@@ -127,7 +142,10 @@ class ApiClient {
             onTimeout: () => throw TimeoutException('Request timeout'),
           );
 
-      return _handleResponse(response);
+      return await _handleResponse(
+        response,
+        hadAuthToken: headers.containsKey('Authorization'),
+      );
     } catch (e) {
       _log('DELETE Error: $e');
       rethrow;
@@ -155,7 +173,10 @@ class ApiClient {
             onTimeout: () => throw TimeoutException('Request timeout'),
           );
 
-      return _handleResponse(response);
+      return await _handleResponse(
+        response,
+        hadAuthToken: requestHeaders.containsKey('Authorization'),
+      );
     } catch (e) {
       _log('PATCH Error: $e');
       rethrow;
@@ -163,7 +184,10 @@ class ApiClient {
   }
 
   /// Handle response
-  dynamic _handleResponse(http.Response response) {
+  Future<dynamic> _handleResponse(
+    http.Response response, {
+    required bool hadAuthToken,
+  }) async {
     _log('Response Status: ${response.statusCode}');
     _log('Response Body: ${response.body}');
 
@@ -173,6 +197,10 @@ class ApiClient {
       if (response.statusCode >= 200 && response.statusCode < 300) {
         return decodedResponse;
       } else {
+        if (response.statusCode == 401 && hadAuthToken) {
+          await _handleUnauthorized();
+        }
+
         final errorMessage =
             decodedResponse['error']?['message'] ??
             decodedResponse['message'] ??
@@ -187,10 +215,29 @@ class ApiClient {
       if (e is ApiException) {
         rethrow;
       }
+
+      if (response.statusCode == 401 && hadAuthToken) {
+        await _handleUnauthorized();
+      }
+
       throw ApiException(
         message: 'Failed to parse response',
         statusCode: response.statusCode,
       );
+    }
+  }
+
+  Future<void> _handleUnauthorized() async {
+    if (_isHandlingUnauthorized) {
+      return;
+    }
+
+    _isHandlingUnauthorized = true;
+    try {
+      await JwtStorage.clearAuth();
+      _onUnauthorized?.call();
+    } finally {
+      _isHandlingUnauthorized = false;
     }
   }
 

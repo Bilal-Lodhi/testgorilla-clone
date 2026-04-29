@@ -126,6 +126,16 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Force logout for expired or invalid session tokens.
+  void handleSessionExpired() {
+    _error = 'Session expired. Please login again.';
+    _isLoggedIn = false;
+    _userRole = null;
+    _userData = null;
+    _isLoading = false;
+    notifyListeners();
+  }
+
   /// Check if user is admin
   bool isAdmin() {
     return _userRole == 'admin';
