@@ -3,20 +3,28 @@ const logger = require('../utils/logger');
 
 const useSsl = process.env.DB_SSL === 'true';
 const sslConfig = useSsl ? { rejectUnauthorized: false } : false;
+const connectionString = process.env.DATABASE_URL;
 
 // Create a pool of connections for PostgreSQL
-const pool = new Pool({
-  host: process.env.DB_HOST || 'localhost',
-  port: process.env.DB_PORT || 5432,
-  database: process.env.DB_NAME || 'testgorilla',
-  user: process.env.DB_USER || 'postgres',
-  password: process.env.DB_PASSWORD || 'postgres',
+const poolConfig = {
   min: parseInt(process.env.DB_POOL_MIN) || 2,
   max: parseInt(process.env.DB_POOL_MAX) || 10,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 2000,
   ssl: sslConfig,
-});
+};
+
+if (connectionString) {
+  poolConfig.connectionString = connectionString;
+} else {
+  poolConfig.host = process.env.DB_HOST || 'localhost';
+  poolConfig.port = process.env.DB_PORT || 5432;
+  poolConfig.database = process.env.DB_NAME || 'testgorilla';
+  poolConfig.user = process.env.DB_USER || 'postgres';
+  poolConfig.password = process.env.DB_PASSWORD || 'postgres';
+}
+
+const pool = new Pool(poolConfig);
 
 /**
  * Handle pool errors

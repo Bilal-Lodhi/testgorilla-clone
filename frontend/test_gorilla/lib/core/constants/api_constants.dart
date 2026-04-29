@@ -5,7 +5,7 @@ class ApiConstants {
 
   static const String _configuredBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: '',
+    defaultValue: 'https://testgorilla-clone.onrender.com/api/v1',
   );
 
   static String get _host {

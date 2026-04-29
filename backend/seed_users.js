@@ -1,4 +1,9 @@
 const http = require('http');
+const https = require('https');
+
+const apiBaseUrl = process.env.API_BASE_URL || 'https://testgorilla-clone.onrender.com/api/v1';
+const apiUrl = new URL(apiBaseUrl);
+const client = apiUrl.protocol === 'https:' ? https : http;
 
 const users = [
   {
@@ -34,9 +39,9 @@ function registerUser(userData) {
     const data = JSON.stringify(userData);
 
     const options = {
-      hostname: 'localhost',
-      port: 5000,
-      path: '/api/v1/auth/register',
+      hostname: apiUrl.hostname,
+      port: apiUrl.port || (apiUrl.protocol === 'https:' ? 443 : 80),
+      path: `${apiUrl.pathname.replace(/\/$/, '')}/auth/register`,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -44,7 +49,7 @@ function registerUser(userData) {
       }
     };
 
-    const req = http.request(options, (res) => {
+    const req = client.request(options, (res) => {
       let body = '';
       res.on('data', chunk => body += chunk);
       res.on('end', () => {
