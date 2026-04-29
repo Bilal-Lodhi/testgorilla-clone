@@ -204,30 +204,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
                   SizedBox(height: 32),
 
-                  // Demo Credentials Info
-                  Container(
-                    padding: EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.blue[50],
-                      border: Border.all(color: Colors.blue[200]!),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Demo Credentials',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        SizedBox(height: 8),
-                        Text('Admin: test2@example.com / 123456'),
-                        Text('Candidate: test1@example.com / 123456'),
-                      ],
-                    ),
-                  ),
-
-                  SizedBox(height: 32),
-
                   // Signup Link
                   Center(
                     child: MouseRegion(
