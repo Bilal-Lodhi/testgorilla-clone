@@ -1,6 +1,9 @@
 const { Pool } = require('pg');
 const logger = require('../utils/logger');
 
+const useSsl = process.env.DB_SSL === 'true';
+const sslConfig = useSsl ? { rejectUnauthorized: false } : false;
+
 // Create a pool of connections for PostgreSQL
 const pool = new Pool({
   host: process.env.DB_HOST || 'localhost',
@@ -12,6 +15,7 @@ const pool = new Pool({
   max: parseInt(process.env.DB_POOL_MAX) || 10,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 2000,
+  ssl: sslConfig,
 });
 
 /**

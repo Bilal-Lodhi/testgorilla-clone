@@ -3,6 +3,11 @@ import 'package:flutter/foundation.dart';
 class ApiConstants {
   static const String _apiPath = '/api/v1';
 
+  static const String _configuredBaseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: '',
+  );
+
   static String get _host {
     if (kIsWeb) {
       return 'localhost';
@@ -17,7 +22,13 @@ class ApiConstants {
     }
   }
 
-  static String get baseUrl => 'http://$_host:5000$_apiPath';
+  static String get baseUrl {
+    if (_configuredBaseUrl.isNotEmpty) {
+      return _configuredBaseUrl;
+    }
+
+    return 'http://$_host:5000$_apiPath';
+  }
 
   // Auth endpoints
   static const String authRegister = '/auth/register';
