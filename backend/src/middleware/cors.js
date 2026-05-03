@@ -16,11 +16,13 @@ const configureCors = () => {
   const NODE_ENV = process.env.NODE_ENV || 'development';
   const corsOriginEnv = process.env.CORS_ORIGIN || '';
   
-  // Parse allowed origins from environment
-  const envOrigins = corsOriginEnv
-    .split(',')
-    .map(o => o.trim())
-    .filter(o => o && o !== '*');
+  const rawEnvOrigins = corsOriginEnv.split(',').map(o => o.trim()).filter(Boolean);
+
+  // Support exact origins and wildcard-localhost entries like 'http://localhost:*'
+  const exactEnvOrigins = rawEnvOrigins.filter(o => o && !o.includes(':*') && o !== '*');
+  const wildcardLocalOrigins = rawEnvOrigins
+    .filter(o => o.endsWith(':*'))
+    .map(o => o.replace(/:\*$/, ''));
 
   logger.info('CORS configuration', {
     environment: NODE_ENV,
@@ -48,12 +50,20 @@ const configureCors = () => {
       }
 
       // Environment-configured origins
-      if (envOrigins.includes('*')) {
+      if (rawEnvOrigins.includes('*')) {
         logger.warn('CORS configured with wildcard (*) - use explicit origins in production');
         return callback(null, true);
       }
 
-      if (envOrigins.includes(origin)) {
+      // Exact match
+      if (exactEnvOrigins.includes(origin)) {
+        logger.debug('CORS allow decision', { origin, allowedBy: 'exact' });
+        return callback(null, true);
+      }
+
+      // Wildcard localhost match (e.g. http://localhost:*)
+      if (wildcardLocalOrigins.some(prefix => origin && origin.startsWith(prefix))) {
+        logger.debug('CORS allow decision', { origin, allowedBy: 'wildcard-local' });
         return callback(null, true);
       }
 
