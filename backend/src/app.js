@@ -17,6 +17,14 @@ const app = express();
  * ===== MIDDLEWARE SETUP =====
  */
 
+// Log incoming origin and preflight headers for debugging CORS issues
+app.use((req, res, next) => {
+  const origin = req.get('origin') || null;
+  const acrh = req.get('access-control-request-headers') || null;
+  logger.debug('CORS debug - incoming request', { method: req.method, path: req.path, origin, accessControlRequestHeaders: acrh });
+  next();
+});
+
 // CORS configuration
 app.use(configureCors());
 
