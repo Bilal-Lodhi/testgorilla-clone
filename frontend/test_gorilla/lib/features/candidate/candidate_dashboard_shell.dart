@@ -1,8 +1,11 @@
 // ignore_for_file: unnecessary_cast
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:test_gorilla/core/api/api_client.dart';
+import 'package:test_gorilla/core/storage/attempt_storage.dart';
+import 'package:test_gorilla/core/storage/access_code_storage.dart';
 import 'package:test_gorilla/core/theme/app_theme.dart';
 import 'package:test_gorilla/features/auth/auth_provider.dart';
 import 'package:test_gorilla/features/candidate/test_list_screen.dart';
@@ -25,12 +28,17 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
   String? _selectedAttemptId;
   bool _isHistoryPanelExpanded = false;
 
+  /// Active attempt available for resume
+  Map<String, dynamic>? _resumableAttempt;
+  bool _isCheckingResume = true;
+
   @override
   void initState() {
     super.initState();
     final apiClient = context.read<ApiClient>();
     _testService = TestService(apiClient);
     _refreshHistory(resetSelection: true);
+    unawaited(_checkForResumableAttempt());
   }
 
   void _refreshHistory({bool resetSelection = false}) {
@@ -40,6 +48,46 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
       }
       _historyFuture = _loadHistory();
     });
+  }
+
+  /// Check for an in_progress attempt. Store it in state so the UI can show
+  /// a Resume button rather than auto-redirecting.
+  Future<void> _checkForResumableAttempt() async {
+    try {
+      final attemptId = await AttemptStorage.getAttemptId();
+      if (attemptId == null) {
+        if (mounted) setState(() => _isCheckingResume = false);
+        return;
+      }
+
+      final data = await _testService.getAttempt(attemptId);
+      final attempt = data['attempt'] as Map<String, dynamic>?;
+
+      if (attempt == null) {
+        await AttemptStorage.clear();
+        if (mounted) setState(() => _isCheckingResume = false);
+        return;
+      }
+
+      final status = (attempt['status'] as String?) ?? '';
+
+      if (status == 'in_progress') {
+        // Valid resume target — store for UI
+        if (mounted) {
+          setState(() {
+            _resumableAttempt = data;
+            _isCheckingResume = false;
+          });
+        }
+      } else {
+        // Submitted, expired, or otherwise done — clear
+        await AttemptStorage.clear();
+        if (mounted) setState(() => _isCheckingResume = false);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isCheckingResume = false);
+      // Keep storage for later retry
+    }
   }
 
   Future<List<_CandidateAttemptSummary>> _loadHistory() async {
@@ -214,6 +262,153 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
         '${twoDigits(local.hour)}:${twoDigits(local.minute)}';
   }
 
+  /// Build a "Resume Test" banner shown when an active attempt exists
+  Widget _buildResumeBanner() {
+    if (_isCheckingResume || _resumableAttempt == null) {
+      return const SizedBox.shrink();
+    }
+
+    final attempt = _resumableAttempt!['attempt'] as Map<String, dynamic>?;
+    final testTitle =
+        (attempt?['test_title'] as String?) ??
+        _resumableAttempt!['test_title'] as String? ??
+        'Test';
+
+    // Calculate remaining time
+    String remainingText = '';
+    final startTimeStr =
+        _resumableAttempt!['start_time'] as String? ??
+        attempt?['start_time'] as String?;
+    final durationMinutes =
+        _resumableAttempt!['duration'] as int? ??
+        attempt?['duration_minutes'] as int? ??
+        60;
+
+    if (startTimeStr != null) {
+      final startTime = DateTime.tryParse(startTimeStr)?.toUtc();
+      if (startTime != null) {
+        final endTime = startTime.add(Duration(minutes: durationMinutes));
+        final remaining = endTime.difference(DateTime.now().toUtc());
+        if (remaining.inSeconds > 0) {
+          final mins = remaining.inMinutes;
+          final secs = remaining.inSeconds % 60;
+          remainingText =
+              '${mins}m ${secs.toString().padLeft(2, '0')}s remaining';
+        } else {
+          remainingText = 'Time expired';
+        }
+      }
+    }
+
+    return Card(
+      color: Colors.orange.shade50,
+      margin: const EdgeInsets.only(bottom: 16),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Icon(Icons.play_circle_filled, color: Colors.orange.shade700),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'You have an active test in progress',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: Colors.orange.shade900,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    testTitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.orange.shade800,
+                    ),
+                  ),
+                  if (remainingText.isNotEmpty)
+                    Text(
+                      remainingText,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.orange.shade600,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            ElevatedButton.icon(
+              onPressed: _resumeTest,
+              icon: const Icon(Icons.play_arrow, size: 18),
+              label: const Text('Resume'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange.shade700,
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Navigate to attempt screen with resume data
+  Future<void> _resumeTest() async {
+    if (_resumableAttempt == null) return;
+
+    final data = _resumableAttempt!;
+    final attempt = data['attempt'] as Map<String, dynamic>?;
+    if (attempt == null) return;
+
+    final attemptId = attempt['id'] as String?;
+    final testId = attempt['test_id'] as String?;
+    if (attemptId == null || testId == null) return;
+
+    final accessCode = await AccessCodeStorage.getCode(testId) ?? '';
+
+    final now = DateTime.now();
+    final durationMinutes =
+        data['duration'] as int? ?? attempt['duration_minutes'] as int? ?? 60;
+
+    if (!mounted) return;
+    await Navigator.of(context).pushNamed(
+      '/candidate/attempt',
+      arguments: {
+        'test': Test(
+          id: testId,
+          title:
+              (attempt['test_title'] as String?) ??
+              data['test_title'] as String? ??
+              'Test',
+          durationMinutes: durationMinutes,
+          status: 'active',
+          passPercentage: 60.0,
+          totalQuestions: 0,
+          createdAt: now,
+          updatedAt: now,
+          createdBy: '',
+        ),
+        'accessCode': accessCode,
+        'resumeAttemptId': attemptId,
+      },
+    );
+
+    // Re-check state after returning (attempt may have been submitted)
+    if (mounted) {
+      setState(() {
+        _resumableAttempt = null;
+        _isCheckingResume = true;
+      });
+      unawaited(_checkForResumableAttempt());
+      _refreshHistory();
+    }
+  }
+
   Future<void> _openResult(String attemptId) async {
     await Navigator.of(
       context,
@@ -385,9 +580,17 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
                       Expanded(
                         child: Padding(
                           padding: const EdgeInsets.all(24),
-                          child: TestListScreen(
-                            embedded: true,
-                            onAttemptFlowCompleted: () => _refreshHistory(),
+                          child: Column(
+                            children: [
+                              _buildResumeBanner(),
+                              Expanded(
+                                child: TestListScreen(
+                                  embedded: true,
+                                  onAttemptFlowCompleted: () =>
+                                      _refreshHistory(),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
@@ -395,9 +598,16 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
                   )
                 : Padding(
                     padding: const EdgeInsets.all(16),
-                    child: TestListScreen(
-                      embedded: true,
-                      onAttemptFlowCompleted: () => _refreshHistory(),
+                    child: Column(
+                      children: [
+                        _buildResumeBanner(),
+                        Expanded(
+                          child: TestListScreen(
+                            embedded: true,
+                            onAttemptFlowCompleted: () => _refreshHistory(),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
           ),
