@@ -1,12 +1,12 @@
-const db = require('../config/db');
+const attemptService = require('../services/attemptService');
 const { ApiError } = require('./errorHandler');
 const { HTTP_STATUS } = require('../utils/constants');
 const logger = require('../utils/logger');
 
 /**
- * Middleware to verify ownership of attempt (auth only, no status checks)
- * Attach attempt info to req.attempt
- * Used by submitAttempt to allow idempotent retries
+ * Middleware to verify ownership of attempt.
+ * Also enforces expiry via attemptService.enforceExpiry().
+ * Attaches attempt info to req.attempt.
  */
 const verifyAttemptOwnership = async (req, res, next) => {
   try {
@@ -16,20 +16,11 @@ const verifyAttemptOwnership = async (req, res, next) => {
       return next();
     }
 
-    // Get attempt details
-    const result = await db.query(
-      `SELECT id, test_id, user_id, status FROM test_attempts WHERE id = $1`,
-      [attemptId]
-    );
+    const attempt = await attemptService.getAttempt(attemptId);
 
-    if (result.rows.length === 0) {
-      return next(new ApiError(
-        HTTP_STATUS.NOT_FOUND,
-        'Attempt not found'
-      ));
+    if (!attempt) {
+      return next(new ApiError(HTTP_STATUS.NOT_FOUND, 'Attempt not found'));
     }
-
-    const attempt = result.rows[0];
 
     // Verify ownership: user must own this attempt
     if (attempt.user_id !== req.user.id) {
@@ -39,7 +30,7 @@ const verifyAttemptOwnership = async (req, res, next) => {
       ));
     }
 
-    // Attach to request
+    // Attach to request (expiry already enforced by getAttempt)
     req.attempt = attempt;
 
     next();
@@ -50,10 +41,8 @@ const verifyAttemptOwnership = async (req, res, next) => {
 };
 
 /**
- * Middleware to check active attempt and enforce duration limits
- * Attach attempt info to req.attempt if exists
- * Used by getAttempt and submitResponse routes
- * NOT used by submitAttempt to allow idempotent retries
+ * Middleware to check active attempt.
+ * Delegates expiry enforcement to attemptService.getAttempt().
  */
 const checkActiveAttempt = async (req, res, next) => {
   try {
@@ -63,48 +52,23 @@ const checkActiveAttempt = async (req, res, next) => {
       return next();
     }
 
-    // Get attempt details
-    const result = await db.query(
-      `SELECT a.id, a.test_id, a.user_id, a.start_time, a.status, t.duration_minutes
-       FROM test_attempts a
-       JOIN tests t ON a.test_id = t.id
-       WHERE a.id = $1`,
-      [attemptId]
-    );
+    const attempt = await attemptService.getAttempt(attemptId);
 
-    if (result.rows.length === 0) {
-      return next();
+    if (!attempt) {
+      return next(new ApiError(HTTP_STATUS.NOT_FOUND, 'Attempt not found'));
     }
 
-    const attempt = result.rows[0];
-
-    // Check if attempt is still in progress
+    // After getAttempt, if status changed to 'submitted' due to expiry,
+    // the service auto-handled it. Let the caller decide how to handle.
     if (attempt.status !== 'in_progress') {
       return next(new ApiError(
         HTTP_STATUS.BAD_REQUEST,
-        'This test attempt is no longer in progress'
+        attempt.expired ? 'This test attempt has expired' : 'This test attempt is no longer in progress'
       ));
     }
 
-    // Check if time limit exceeded
-    const startTime = new Date(attempt.start_time);
-    const currentTime = new Date();
-    const elapsedMinutes = (currentTime - startTime) / (1000 * 60);
-    const durationMinutes = attempt.duration_minutes;
-
-    if (elapsedMinutes > durationMinutes) {
-      return next(new ApiError(
-        HTTP_STATUS.BAD_REQUEST,
-        `Test duration exceeded. Time limit: ${durationMinutes} minutes`
-      ));
-    }
-
-    // Attach to request
-    req.attempt = {
-      ...attempt,
-      timeRemaining: Math.ceil(durationMinutes - elapsedMinutes),
-      elapsedTime: Math.floor(elapsedMinutes),
-    };
+    // Attach to request with timing info from the service
+    req.attempt = attempt;
 
     next();
   } catch (error) {
@@ -114,7 +78,9 @@ const checkActiveAttempt = async (req, res, next) => {
 };
 
 /**
- * Middleware to check if user has only one active attempt per test
+ * Middleware to check if user already has an active attempt for this test.
+ * Now permissive: returns existing attempt instead of blocking,
+ * allowing idempotent startAttempt.
  */
 const preventMultipleAttempts = async (req, res, next) => {
   try {
@@ -125,17 +91,12 @@ const preventMultipleAttempts = async (req, res, next) => {
       return next();
     }
 
-    const result = await db.query(
-      `SELECT id FROM test_attempts 
-       WHERE test_id = $1 AND user_id = $2 AND status = 'in_progress'`,
-      [testId, userId]
-    );
+    // Check for existing active attempt
+    const activeAttempt = await attemptService.getActiveAttempt(userId);
 
-    if (result.rows.length > 0) {
-      return next(new ApiError(
-        HTTP_STATUS.CONFLICT,
-        'You already have an active attempt for this test'
-      ));
+    if (activeAttempt && activeAttempt.attempt && activeAttempt.attempt.test_id === testId) {
+      // Attach to req for controller to use
+      req.existingActiveAttempt = activeAttempt;
     }
 
     next();
