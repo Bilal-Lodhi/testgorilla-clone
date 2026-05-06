@@ -1,222 +1,356 @@
+import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/foundation.dart';
-import 'package:provider/provider.dart';
-import 'dart:async';
 import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
-import 'package:test_gorilla/core/api/api_client.dart';
-import 'package:test_gorilla/core/theme/app_theme.dart';
-import 'package:test_gorilla/features/shared/models/models.dart';
+import 'package:provider/provider.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:test_gorilla/core/api/api_client.dart';
+import 'package:test_gorilla/core/storage/access_code_storage.dart';
+import 'package:test_gorilla/core/storage/attempt_storage.dart';
+import 'package:test_gorilla/core/theme/app_theme.dart';
+import 'package:test_gorilla/core/utils/before_unload.dart';
+import 'package:test_gorilla/features/candidate/test_service.dart';
+import 'package:test_gorilla/features/shared/models/models.dart';
 import 'package:test_gorilla/features/shared/widgets/app_widgets.dart'
     as app_widgets;
-import 'package:test_gorilla/features/candidate/test_service.dart';
 
 class AttemptScreen extends StatefulWidget {
   final Test test;
+  final String accessCode;
 
-  const AttemptScreen({Key? key, required this.test}) : super(key: key);
+  /// Optional: if resuming from storage, pass the attemptId directly
+  final String? resumeAttemptId;
+
+  const AttemptScreen({
+    Key? key,
+    required this.test,
+    this.accessCode = '',
+    this.resumeAttemptId,
+  }) : super(key: key);
 
   @override
   State<AttemptScreen> createState() => _AttemptScreenState();
 }
 
-class _AttemptScreenState extends State<AttemptScreen> {
+class _AttemptScreenState extends State<AttemptScreen>
+    with WidgetsBindingObserver {
   late TestService _testService;
-  late Future<List<Question>> _questionsFuture;
+
+  // --- Questions ---
   List<Question> _questionsCache = [];
-  TestAttempt? _currentAttempt;
   int _currentQuestionIndex = 0;
+
+  // --- Attempt data from backend ---
+  String? _attemptId;
+  DateTime? _startTime;
+  int _durationMinutes = 60;
+  String _attemptStatus = 'in_progress';
+
+  // --- Server-authoritative timer ---
   Timer? _timer;
+  int _remainingSeconds = 0;
+  bool _timeExpired = false;
+
+  // --- Audio / low-timer warning ---
   final AudioPlayer _lowTimerWarningPlayer = AudioPlayer();
-  late Duration _remainingTime;
-  Map<String, String> _answers = {};
-  final Map<String, TextEditingController> _codeControllers = {};
-  bool _isLoading = false;
-  bool _isSubmittingResponse = false;
-  bool _isBlocked = false;
-  String _blockedMessage = '';
   bool _hasPlayedLowTimerWarning = false;
   bool _hasShownLowTimerFallbackNotice = false;
   bool _hasPlayedNativeToneFallback = false;
   bool _isAudioUnlockAttempted = false;
   bool _isLowTimerWarningPendingAudioUnlock = false;
 
+  // --- Answers ---
+  Map<String, String> _answers = {};
+  final Map<String, TextEditingController> _codeControllers = {};
+
+  // --- Loading states ---
+  bool _isLoading = false;
+  bool _isSubmittingResponse = false;
+  bool _isInitializing = true;
+  String? _initError;
+
+  // --- Blocked state (409 or other permanent block) ---
+  bool _isBlocked = false;
+  String _blockedMessage = '';
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     final apiClient = context.read<ApiClient>();
     _testService = TestService(apiClient);
-    _remainingTime = Duration(minutes: widget.test.durationMinutes);
     unawaited(_primeLowTimerWarningAudio());
+    _loadQuestions();
     _initializeAttempt();
   }
 
-  Future<void> _primeLowTimerWarningAudio() async {
-    if (kIsWeb) {
-      const webAssetUrls = <String>[
-        'assets/lib/core/utils/tenseconds.mp3',
-        'assets/tenseconds.mp3',
-      ];
+  // ── Lifecycle: detect app resume / browser refresh ──
 
-      for (final url in webAssetUrls) {
-        try {
-          await _lowTimerWarningPlayer.setSourceUrl(url);
-          await _lowTimerWarningPlayer.stop();
-          return;
-        } catch (_) {
-          // Try the next URL variant.
-        }
-      }
-    }
-
-    const candidateAssetPaths = <String>[
-      'tenseconds.mp3',
-      'core/utils/tenseconds.mp3',
-      'lib/core/utils/tenseconds.mp3',
-      'assets/lib/core/utils/tenseconds.mp3',
-    ];
-
-    for (final path in candidateAssetPaths) {
-      try {
-        await _lowTimerWarningPlayer.setSource(AssetSource(path));
-        await _lowTimerWarningPlayer.stop();
-        return;
-      } catch (_) {
-        // Try the next key variant.
-      }
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _attemptId != null) {
+      // Re-sync with backend on app resume
+      unawaited(_syncAttemptFromBackend());
     }
   }
 
-  Future<void> _unlockLowTimerAudioFromGesture() async {
-    if (_isAudioUnlockAttempted && !_isLowTimerWarningPendingAudioUnlock) {
-      return;
+  // ── Browser refresh warning (JS interop) ──
+
+  void _setupBeforeUnloadWarning() {
+    if (_attemptStatus != 'in_progress') return;
+    BeforeUnloadHandler.enableWarning();
+  }
+
+  void _removeBeforeUnloadWarning() {
+    BeforeUnloadHandler.disableWarning();
+  }
+
+  @override
+  void dispose() {
+    _removeBeforeUnloadWarning();
+    WidgetsBinding.instance.removeObserver(this);
+    _timer?.cancel();
+    unawaited(_lowTimerWarningPlayer.dispose());
+    for (final controller in _codeControllers.values) {
+      controller.dispose();
     }
+    super.dispose();
+  }
 
-    _isAudioUnlockAttempted = true;
-    var didUnlock = false;
+  // ── Fetch questions ──
 
+  Future<void> _loadQuestions() async {
     try {
-      await _lowTimerWarningPlayer.setReleaseMode(ReleaseMode.stop);
-      await _lowTimerWarningPlayer.setVolume(0.0);
-
-      if (kIsWeb) {
-        const webAssetUrls = <String>[
-          'assets/lib/core/utils/tenseconds.mp3',
-          'assets/tenseconds.mp3',
-        ];
-
-        for (final url in webAssetUrls) {
-          try {
-            await _lowTimerWarningPlayer.play(UrlSource(url));
-            await Future<void>.delayed(const Duration(milliseconds: 40));
-            await _lowTimerWarningPlayer.stop();
-            await _lowTimerWarningPlayer.setVolume(1.0);
-            didUnlock = true;
-            break;
-          } catch (_) {
-            // Try the next URL variant.
-          }
-        }
-      }
-
-      if (!didUnlock) {
-        const candidateAssetPaths = <String>[
-          'tenseconds.mp3',
-          'core/utils/tenseconds.mp3',
-          'lib/core/utils/tenseconds.mp3',
-          'assets/lib/core/utils/tenseconds.mp3',
-        ];
-
-        for (final path in candidateAssetPaths) {
-          try {
-            await _lowTimerWarningPlayer.play(AssetSource(path));
-            await Future<void>.delayed(const Duration(milliseconds: 40));
-            await _lowTimerWarningPlayer.stop();
-            await _lowTimerWarningPlayer.setVolume(1.0);
-            didUnlock = true;
-            break;
-          } catch (_) {
-            // Try the next key variant.
-          }
-        }
-      }
-
-      await _lowTimerWarningPlayer.setVolume(1.0);
+      _questionsCache = await _testService.getTestQuestions(widget.test.id);
     } catch (_) {
-      // Leave fallback path active.
-    }
-
-    final lowTimerWarningSeconds = _getLowTimerWarningSeconds();
-    if (_isLowTimerWarningPendingAudioUnlock &&
-        !_hasPlayedLowTimerWarning &&
-        _remainingTime.inSeconds > 0 &&
-        _remainingTime.inSeconds <= lowTimerWarningSeconds) {
-      _hasPlayedLowTimerWarning = true;
-      _isLowTimerWarningPendingAudioUnlock = false;
-      unawaited(_playLowTimerWarning());
+      // Will be shown in UI
     }
   }
+
+  // ── Initialization: start or resume ──
 
   Future<void> _initializeAttempt() async {
-    _questionsFuture = _testService.getTestQuestions(widget.test.id).then((
-      questions,
-    ) {
-      _questionsCache = questions;
-      return questions;
-    });
-    await _startAttempt();
-    if (_currentAttempt != null) {
-      _startTimer();
-    }
-  }
-
-  TextEditingController _getCodeController(String questionId) {
-    return _codeControllers.putIfAbsent(
-      questionId,
-      () => TextEditingController(text: _answers[questionId] ?? ''),
-    );
-  }
-
-  Future<void> _startAttempt() async {
     try {
-      _currentAttempt = await _testService.startAttempt(widget.test.id);
-    } catch (e) {
-      if (e is ApiException && e.statusCode == 409) {
-        if (!mounted) return;
+      String code = widget.accessCode;
+      if (code.isEmpty) {
+        code = (await AccessCodeStorage.getCode(widget.test.id)) ?? '';
+      }
 
+      Map<String, dynamic> data;
+
+      if (widget.resumeAttemptId != null) {
+        // Resume existing attempt
+        data = await _testService.getAttempt(widget.resumeAttemptId!);
+      } else {
+        // Start new attempt (backend handles idempotency)
+        data = await _testService.startAttempt(
+          widget.test.id,
+          accessCode: code,
+        );
+      }
+
+      _applyAttemptData(data);
+    } on ApiException catch (e) {
+      if (e.statusCode == 409) {
+        if (!mounted) return;
         setState(() {
           _isBlocked = true;
           _blockedMessage =
-              'This test has already been started for your account. Reattempts and resume are disabled.';
+              'This test has already been submitted or is no longer available.';
+          _isInitializing = false;
         });
         return;
       }
-
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error starting attempt: $e')));
+        setState(() {
+          _initError = e.toString();
+          _isInitializing = false;
+        });
       }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _initError = e.toString();
+          _isInitializing = false;
+        });
+      }
+    }
+  }
+
+  /// Parse attempt data from backend and set up timer + navigation state
+  void _applyAttemptData(Map<String, dynamic> data) {
+    final attempt = data['attempt'] as Map<String, dynamic>?;
+    if (attempt == null) {
+      setState(() {
+        _initError = 'Invalid attempt data from server';
+        _isInitializing = false;
+      });
+      return;
+    }
+
+    final status = (attempt['status'] as String?) ?? 'in_progress';
+
+    // If already completed, go straight to results
+    if (status == 'submitted' || status == 'completed') {
+      _attemptId = attempt['id'] as String?;
+      _removeBeforeUnloadWarning();
+      if (_attemptId != null && mounted) {
+        Navigator.of(
+          context,
+        ).pushReplacementNamed('/candidate/result', arguments: _attemptId);
+      }
+      return;
+    }
+
+    // Parse timing
+    final startTimeStr =
+        data['start_time'] as String? ?? attempt['start_time'] as String?;
+    final durationMinutes =
+        data['duration'] as int? ?? widget.test.durationMinutes;
+
+    _attemptId = attempt['id'] as String?;
+    _attemptStatus = status;
+    _durationMinutes = durationMinutes;
+
+    if (startTimeStr != null) {
+      _startTime = DateTime.tryParse(startTimeStr)?.toUtc();
+    }
+    _startTime ??= DateTime.now().toUtc();
+
+    // Parse current question index
+    final idx = data['current_question_index'];
+    if (idx is int && idx >= 0) {
+      _currentQuestionIndex = idx;
+    }
+
+    // ── Restore answers from backend responses ──
+    _restoreAnswersFromResponses(data['responses']);
+
+    // Persist to local storage
+    if (_attemptId != null) {
+      unawaited(
+        AttemptStorage.setActiveAttempt(
+          attemptId: _attemptId!,
+          testId: widget.test.id,
+          durationMinutes: _durationMinutes,
+        ),
+      );
+    }
+
+    // Compute remaining time from server data
+    _recomputeRemainingTime();
+
+    if (!mounted) return;
+    setState(() {
+      _isInitializing = false;
+    });
+    _startTimer();
+    _setupBeforeUnloadWarning();
+  }
+
+  /// Restore user answers from backend responses.
+  /// Maps responses like:
+  ///   { question_id: "abc", selected_option_id: "xyz" }  →  _answers["abc"] = "optionIndex"
+  ///   { question_id: "def", code_answer: "some text" }   →  _answers["def"] = "some text"
+  void _restoreAnswersFromResponses(dynamic responses) {
+    if (responses is! List) return;
+
+    // Build a quick lookup: optionId → option index for each question
+    final optionIndexMap = <String, int>{};
+    for (final q in _questionsCache) {
+      if (q.options != null) {
+        for (var i = 0; i < q.options!.length; i++) {
+          optionIndexMap[q.options![i].id] = i;
+        }
+      }
+    }
+
+    final restored = <String, String>{};
+
+    for (final r in responses) {
+      if (r is! Map<String, dynamic>) continue;
+
+      final questionId = r['question_id'] as String?;
+      if (questionId == null) continue;
+
+      // MCQ: selected_option_id → find its index
+      final selectedOptionId = r['selected_option_id'] as String?;
+      if (selectedOptionId != null) {
+        final idx = optionIndexMap[selectedOptionId];
+        if (idx != null) {
+          restored[questionId] = idx.toString();
+        }
+      }
+
+      // Coding/Essay: code_answer → text
+      final codeAnswer = r['code_answer'] as String?;
+      if (codeAnswer != null && codeAnswer.isNotEmpty) {
+        restored[questionId] = codeAnswer;
+      }
+    }
+
+    _answers = restored;
+
+    // Populate code controllers for coding questions
+    for (final entry in restored.entries) {
+      final matching = _questionsCache.where((q) => q.id == entry.key);
+      if (matching.isNotEmpty) {
+        final q = matching.first;
+        if (q.type == 'coding') {
+          _codeControllers[q.id] = TextEditingController(text: entry.value);
+        }
+      }
+    }
+  }
+
+  // ── Server-authoritative timer ──
+
+  /// Compute remainingTime = endTime - now (in seconds)
+  /// endTime = startTime + duration
+  void _recomputeRemainingTime() {
+    if (_startTime == null) {
+      _remainingSeconds = _durationMinutes * 60;
+      return;
+    }
+
+    final endTime = _startTime!.add(Duration(minutes: _durationMinutes));
+    final now = DateTime.now().toUtc();
+    _remainingSeconds = endTime.difference(now).inSeconds;
+
+    if (_remainingSeconds < 0) {
+      _remainingSeconds = 0;
     }
   }
 
   void _startTimer() {
-    _timer = Timer.periodic(Duration(seconds: 1), (timer) {
+    _timer?.cancel();
+
+    // Do an initial sync with backend to get accurate time
+    _recomputeRemainingTime();
+
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) {
         timer.cancel();
         return;
       }
 
+      // Every 30 seconds, re-sync with backend
+      if (_remainingSeconds > 0 && _remainingSeconds % 30 == 0) {
+        unawaited(_syncAttemptFromBackend());
+      }
+
       var shouldPlayLowTimerWarning = false;
       setState(() {
-        if (_remainingTime.inSeconds > 0) {
-          _remainingTime = _remainingTime - Duration(seconds: 1);
+        if (_remainingSeconds > 0) {
+          _remainingSeconds--;
         }
 
         final lowTimerWarningSeconds = _getLowTimerWarningSeconds();
         if (!_hasPlayedLowTimerWarning &&
-            _remainingTime.inSeconds == lowTimerWarningSeconds) {
+            _remainingSeconds <= lowTimerWarningSeconds &&
+            _remainingSeconds > 0) {
           shouldPlayLowTimerWarning = true;
         }
       });
@@ -231,47 +365,127 @@ class _AttemptScreenState extends State<AttemptScreen> {
         }
       }
 
-      if (_remainingTime.inSeconds <= 0) {
+      if (_remainingSeconds <= 0 && !_timeExpired) {
+        _timeExpired = true;
         timer.cancel();
-        _submitAttempt();
+        _handleTimeExpired();
       }
     });
   }
 
-  String _formatTimerDisplay(Duration duration) {
-    final minutes = duration.inMinutes;
-    final seconds = duration.inSeconds.remainder(60);
-    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+  Future<void> _syncAttemptFromBackend() async {
+    if (_attemptId == null) return;
+    try {
+      final data = await _testService.getAttempt(_attemptId!);
+      final attempt = data['attempt'] as Map<String, dynamic>?;
+
+      if (attempt != null) {
+        final status = (attempt['status'] as String?) ?? '';
+        if (status == 'submitted' || status == 'completed') {
+          // Server auto-submitted
+          _removeBeforeUnloadWarning();
+          _timer?.cancel();
+          if (mounted) {
+            Navigator.of(
+              context,
+            ).pushReplacementNamed('/candidate/result', arguments: _attemptId);
+          }
+          return;
+        }
+
+        // Update timing from server
+        final startTimeStr = data['start_time'] as String?;
+        if (startTimeStr != null) {
+          _startTime = DateTime.tryParse(startTimeStr)?.toUtc();
+        }
+        _recomputeRemainingTime();
+
+        if (mounted) {
+          setState(() {});
+        }
+      }
+    } catch (_) {
+      // Non-critical sync failure, timer continues locally
+    }
+  }
+
+  Future<void> _handleTimeExpired() async {
+    // The backend auto-submits on expiry, so just navigate to results
+    _removeBeforeUnloadWarning();
+    if (_attemptId != null && mounted) {
+      unawaited(AttemptStorage.clear());
+      Navigator.of(
+        context,
+      ).pushReplacementNamed('/candidate/result', arguments: _attemptId);
+    }
+  }
+
+  int _getLowTimerWarningSeconds() {
+    final totalMinutes = _durationMinutes;
+    if (totalMinutes >= 10) return 60;
+    if (totalMinutes >= 5) return 30;
+    return 10;
+  }
+
+  String _formatTimerDisplay(int seconds) {
+    final minutes = seconds ~/ 60;
+    final secs = seconds % 60;
+    return '${minutes.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
+  }
+
+  // ── Answers ──
+
+  TextEditingController _getCodeController(String questionId) {
+    return _codeControllers.putIfAbsent(
+      questionId,
+      () => TextEditingController(text: _answers[questionId] ?? ''),
+    );
   }
 
   void _selectAnswer(String questionId, String answerId) {
     setState(() {
       _answers[questionId] = answerId;
     });
-
-    if (_currentAttempt == null || _isSubmittingResponse) {
-      return;
-    }
-
+    if (_attemptId == null || _isSubmittingResponse) return;
     _submitAnswer(questionId, answerId);
   }
 
-  Future<bool> _saveCodingAnswer(Question question) async {
-    if (_currentAttempt == null || _isSubmittingResponse) {
-      return false;
+  void _submitAnswer(String questionId, String answerId) async {
+    if (_isSubmittingResponse || _attemptId == null) return;
+    setState(() => _isSubmittingResponse = true);
+    try {
+      await _testService.submitResponse(
+        _attemptId!,
+        questionId: questionId,
+        selectedOptionId: answerId,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error saving answer: $e'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmittingResponse = false);
+      }
     }
+  }
 
+  Future<bool> _saveCodingAnswer(Question question) async {
+    if (_attemptId == null || _isSubmittingResponse) return false;
     final controller = _getCodeController(question.id);
     final codeAnswer = controller.text;
-
     setState(() {
       _isSubmittingResponse = true;
       _answers[question.id] = codeAnswer;
     });
-
     try {
       await _testService.submitResponse(
-        _currentAttempt!.id,
+        _attemptId!,
         questionId: question.id,
         codeAnswer: codeAnswer,
       );
@@ -293,43 +507,15 @@ class _AttemptScreenState extends State<AttemptScreen> {
     }
   }
 
-  void _submitAnswer(String questionId, String answerId) async {
-    if (_isSubmittingResponse || _currentAttempt == null) return;
-
-    setState(() {
-      _isSubmittingResponse = true;
-    });
-
-    try {
-      await _testService.submitResponse(
-        _currentAttempt!.id,
-        questionId: questionId,
-        selectedOptionId: answerId,
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error saving answer: $e'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isSubmittingResponse = false);
-      }
-    }
-  }
+  // ── Submission ──
 
   Future<void> _submitAttempt({Question? currentQuestion}) async {
-    if (_isLoading || _currentAttempt == null) return;
-
+    if (_isLoading || _attemptId == null) return;
     setState(() => _isLoading = true);
     _timer?.cancel();
 
     try {
-      // Save current coding answer if available
+      // Save current coding answer if any
       final questionToSave =
           currentQuestion ??
           (_questionsCache.isNotEmpty &&
@@ -339,27 +525,25 @@ class _AttemptScreenState extends State<AttemptScreen> {
 
       if (questionToSave != null && questionToSave.type == 'coding') {
         final controller = _getCodeController(questionToSave.id);
-        final codeAnswer = controller.text;
-
         try {
           await _testService.submitResponse(
-            _currentAttempt!.id,
+            _attemptId!,
             questionId: questionToSave.id,
-            codeAnswer: codeAnswer,
+            codeAnswer: controller.text,
           );
-        } catch (e) {
-          // Continue with attempt submission even if saving answer fails
+        } catch (_) {
+          // Continue with submission
         }
       }
 
-      // Submit the test attempt
-      await _testService.submitAttempt(_currentAttempt!.id);
+      await _testService.submitAttempt(_attemptId!);
+      await AttemptStorage.clear();
+      _removeBeforeUnloadWarning();
 
       if (mounted) {
-        Navigator.of(context).pushReplacementNamed(
-          '/candidate/result',
-          arguments: _currentAttempt!.id,
-        );
+        Navigator.of(
+          context,
+        ).pushReplacementNamed('/candidate/result', arguments: _attemptId);
       }
     } catch (e) {
       if (mounted) {
@@ -370,66 +554,138 @@ class _AttemptScreenState extends State<AttemptScreen> {
           ),
         );
         setState(() => _isLoading = false);
+        // Restart timer on submission failure
+        _recomputeRemainingTime();
+        if (_remainingSeconds > 0) {
+          _startTimer();
+        }
       }
     }
   }
 
   Future<void> _confirmSubmitAttempt({Question? currentQuestion}) async {
-    if (_isLoading || _isSubmittingResponse || _currentAttempt == null) {
-      return;
-    }
+    if (_isLoading || _isSubmittingResponse || _attemptId == null) return;
 
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('Submit Test?'),
-          content: const Text(
-            'Are you sure you want to submit this test? You will not be able to change your answers after submitting.',
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Submit Test?'),
+        content: const Text(
+          'Are you sure you want to submit this test? You will not be able to change your answers after submitting.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('Submit'),
-            ),
-          ],
-        );
-      },
+          ElevatedButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Submit'),
+          ),
+        ],
+      ),
     );
 
-    if (confirmed != true || !mounted) {
-      return;
-    }
-
+    if (confirmed != true || !mounted) return;
     await _submitAttempt(currentQuestion: currentQuestion);
   }
 
-  int _getLowTimerWarningSeconds() {
-    final totalMinutes = widget.test.durationMinutes;
+  // ── Audio (unchanged from original) ──
 
-    if (totalMinutes >= 10) {
-      return 60;
+  Future<void> _primeLowTimerWarningAudio() async {
+    if (kIsWeb) {
+      const webAssetUrls = <String>[
+        'assets/lib/core/utils/tenseconds.mp3',
+        'assets/tenseconds.mp3',
+      ];
+      for (final url in webAssetUrls) {
+        try {
+          await _lowTimerWarningPlayer.setSourceUrl(url);
+          await _lowTimerWarningPlayer.stop();
+          return;
+        } catch (_) {}
+      }
     }
 
-    if (totalMinutes >= 5) {
-      return 30;
+    const candidateAssetPaths = <String>[
+      'tenseconds.mp3',
+      'core/utils/tenseconds.mp3',
+      'lib/core/utils/tenseconds.mp3',
+      'assets/lib/core/utils/tenseconds.mp3',
+    ];
+    for (final path in candidateAssetPaths) {
+      try {
+        await _lowTimerWarningPlayer.setSource(AssetSource(path));
+        await _lowTimerWarningPlayer.stop();
+        return;
+      } catch (_) {}
     }
+  }
 
-    return 10;
+  Future<void> _unlockLowTimerAudioFromGesture() async {
+    if (_isAudioUnlockAttempted && !_isLowTimerWarningPendingAudioUnlock)
+      return;
+    _isAudioUnlockAttempted = true;
+    var didUnlock = false;
+
+    try {
+      await _lowTimerWarningPlayer.setReleaseMode(ReleaseMode.stop);
+      await _lowTimerWarningPlayer.setVolume(0.0);
+
+      if (kIsWeb) {
+        const webAssetUrls = <String>[
+          'assets/lib/core/utils/tenseconds.mp3',
+          'assets/tenseconds.mp3',
+        ];
+        for (final url in webAssetUrls) {
+          try {
+            await _lowTimerWarningPlayer.play(UrlSource(url));
+            await Future<void>.delayed(const Duration(milliseconds: 40));
+            await _lowTimerWarningPlayer.stop();
+            await _lowTimerWarningPlayer.setVolume(1.0);
+            didUnlock = true;
+            break;
+          } catch (_) {}
+        }
+      }
+
+      if (!didUnlock) {
+        const candidateAssetPaths = <String>[
+          'tenseconds.mp3',
+          'core/utils/tenseconds.mp3',
+          'lib/core/utils/tenseconds.mp3',
+          'assets/lib/core/utils/tenseconds.mp3',
+        ];
+        for (final path in candidateAssetPaths) {
+          try {
+            await _lowTimerWarningPlayer.play(AssetSource(path));
+            await Future<void>.delayed(const Duration(milliseconds: 40));
+            await _lowTimerWarningPlayer.stop();
+            await _lowTimerWarningPlayer.setVolume(1.0);
+            didUnlock = true;
+            break;
+          } catch (_) {}
+        }
+      }
+
+      await _lowTimerWarningPlayer.setVolume(1.0);
+    } catch (_) {}
+
+    if (_isLowTimerWarningPendingAudioUnlock &&
+        !_hasPlayedLowTimerWarning &&
+        _remainingSeconds > 0 &&
+        _remainingSeconds <= _getLowTimerWarningSeconds()) {
+      _hasPlayedLowTimerWarning = true;
+      _isLowTimerWarningPendingAudioUnlock = false;
+      unawaited(_playLowTimerWarning());
+    }
   }
 
   Future<void> _playLowTimerWarning() async {
     var didPlayAudio = false;
 
     try {
-      if (kIsWeb && !_isAudioUnlockAttempted) {
-        // Web playback often requires a prior user gesture to unlock audio.
-        return;
-      }
+      if (kIsWeb && !_isAudioUnlockAttempted) return;
 
       await _lowTimerWarningPlayer.stop();
       await _lowTimerWarningPlayer.setReleaseMode(ReleaseMode.stop);
@@ -440,21 +696,17 @@ class _AttemptScreenState extends State<AttemptScreen> {
           'assets/lib/core/utils/tenseconds.mp3',
           'assets/tenseconds.mp3',
         ];
-
         for (final url in webAssetUrls) {
           try {
             for (var i = 0; i < 3; i++) {
               await _lowTimerWarningPlayer.play(UrlSource(url));
               didPlayAudio = true;
-
               if (i < 2) {
                 await Future<void>.delayed(const Duration(milliseconds: 400));
               }
             }
             break;
-          } catch (_) {
-            // Try the next URL variant.
-          }
+          } catch (_) {}
         }
       }
 
@@ -464,27 +716,21 @@ class _AttemptScreenState extends State<AttemptScreen> {
         'lib/core/utils/tenseconds.mp3',
         'assets/lib/core/utils/tenseconds.mp3',
       ];
-
       for (final path in candidateAssetPaths) {
         try {
           for (var i = 0; i < 3; i++) {
             await _lowTimerWarningPlayer.play(AssetSource(path));
             didPlayAudio = true;
-
             if (i < 2) {
               await Future<void>.delayed(const Duration(milliseconds: 400));
             }
           }
           break;
-        } catch (_) {
-          // Try the next key variant.
-        }
+        } catch (_) {}
       }
     } catch (_) {}
 
-    if (didPlayAudio) {
-      return;
-    }
+    if (didPlayAudio) return;
 
     if (!_hasPlayedNativeToneFallback) {
       _hasPlayedNativeToneFallback = true;
@@ -501,9 +747,7 @@ class _AttemptScreenState extends State<AttemptScreen> {
           looping: false,
         );
         return;
-      } catch (_) {
-        // Continue to non-ringtone fallbacks.
-      }
+      } catch (_) {}
     }
 
     for (var i = 0; i < 3; i++) {
@@ -527,19 +771,47 @@ class _AttemptScreenState extends State<AttemptScreen> {
     }
   }
 
-  @override
-  void dispose() {
-    _timer?.cancel();
-    unawaited(_lowTimerWarningPlayer.dispose());
-    for (final controller in _codeControllers.values) {
-      controller.dispose();
-    }
-    super.dispose();
-  }
+  // ── Build ──
 
   @override
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.of(context).size.width < 600;
+
+    // Init / error states
+    if (_isInitializing) {
+      return Scaffold(
+        appBar: AppBar(title: Text(widget.test.title)),
+        body: const app_widgets.LoadingWidget(
+          message: 'Setting up your test...',
+        ),
+      );
+    }
+
+    if (_initError != null) {
+      return Scaffold(
+        appBar: AppBar(title: Text(widget.test.title)),
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.error_outline, size: 64, color: Colors.red),
+              const SizedBox(height: 16),
+              Text(
+                'Failed to load test',
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              const SizedBox(height: 8),
+              Text(_initError!, textAlign: TextAlign.center),
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Go Back'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
     if (_isBlocked) {
       return Scaffold(
@@ -572,26 +844,38 @@ class _AttemptScreenState extends State<AttemptScreen> {
       );
     }
 
-    return WillPopScope(
-      onWillPop: () async {
-        return await showDialog<bool>(
-              context: context,
-              builder: (context) => AlertDialog(
-                title: const Text('Exit Test?'),
-                content: const Text('Your progress will be lost'),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context, false),
-                    child: const Text('Cancel'),
-                  ),
-                  TextButton(
-                    onPressed: () => Navigator.pop(context, true),
-                    child: const Text('Exit'),
-                  ),
-                ],
+    final lowWarningSeconds = _getLowTimerWarningSeconds();
+    final isTimerLow = _remainingSeconds <= lowWarningSeconds;
+
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final shouldPop = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Leave Test?'),
+            content: const Text(
+              'Your progress is saved on the server. You can resume this test later. '
+              'Are you sure you want to leave?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Stay'),
               ),
-            ) ??
-            false;
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('Leave'),
+              ),
+            ],
+          ),
+        );
+        if (shouldPop == true && context.mounted) {
+          // Don't clear storage — allow resume later
+          Navigator.of(context).pop();
+        }
       },
       child: Listener(
         onPointerDown: (_) {
@@ -609,8 +893,7 @@ class _AttemptScreenState extends State<AttemptScreen> {
                 child: Container(
                   width: 102,
                   decoration: BoxDecoration(
-                    color:
-                        _remainingTime.inSeconds <= _getLowTimerWarningSeconds()
+                    color: isTimerLow
                         ? AppTheme.errorColor
                         : AppTheme.successColor,
                     borderRadius: BorderRadius.circular(AppTheme.radiusMd),
@@ -624,7 +907,7 @@ class _AttemptScreenState extends State<AttemptScreen> {
                   ),
                   child: Center(
                     child: Text(
-                      _formatTimerDisplay(_remainingTime),
+                      _formatTimerDisplay(_remainingSeconds),
                       textAlign: TextAlign.center,
                       style: const TextStyle(
                         color: Colors.white,
@@ -639,247 +922,203 @@ class _AttemptScreenState extends State<AttemptScreen> {
               ),
             ],
           ),
-          body: FutureBuilder<List<Question>>(
-            future: _questionsFuture,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const app_widgets.LoadingWidget(
-                  message: 'Loading questions...',
-                );
-              }
+          body: _questionsCache.isEmpty
+              ? const app_widgets.LoadingWidget(message: 'Loading questions...')
+              : _buildTestBody(),
+        ),
+      ),
+    );
+  }
 
-              if (snapshot.hasError) {
-                return app_widgets.ErrorWidget(
-                  message: snapshot.error.toString(),
-                );
-              }
+  Widget _buildTestBody() {
+    final currentQuestion = _questionsCache[_currentQuestionIndex];
 
-              final questions = snapshot.data ?? [];
-              if (questions.isEmpty) {
-                return const app_widgets.EmptyStateWidget(
-                  title: 'No Questions',
-                );
-              }
-
-              final currentQuestion = questions[_currentQuestionIndex];
-
-              return app_widgets.AppPageScaffold(
-                maxContentWidth: 940,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+    return app_widgets.AppPageScaffold(
+      maxContentWidth: 940,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Progress bar
+          app_widgets.GlassPanel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    app_widgets.GlassPanel(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              app_widgets.StatusBadge(
-                                label:
-                                    'Question ${_currentQuestionIndex + 1}/${questions.length}',
-                                status: 'draft',
-                              ),
-                              Text(
-                                '${currentQuestion.marks} marks',
-                                style: Theme.of(context).textTheme.titleSmall,
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          LinearProgressIndicator(
-                            value:
-                                (_currentQuestionIndex + 1) / questions.length,
-                            minHeight: 8,
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                        ],
-                      ),
+                    app_widgets.StatusBadge(
+                      label:
+                          'Question ${_currentQuestionIndex + 1}/${_questionsCache.length}',
+                      status: 'draft',
                     ),
-                    const SizedBox(height: 16),
-                    app_widgets.GlassPanel(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            currentQuestion.questionText,
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                          const SizedBox(height: 20),
-                          if (currentQuestion.type == 'mcq' &&
-                              currentQuestion.options != null) ...[
-                            ...currentQuestion.options!.asMap().entries.map((
-                              entry,
-                            ) {
-                              final optionIndex = entry.key;
-                              final option = entry.value;
-                              final isSelected =
-                                  _answers[currentQuestion.id] ==
-                                  optionIndex.toString();
-                              return Padding(
-                                padding: const EdgeInsets.only(bottom: 12),
-                                child: InkWell(
-                                  onTap: () {
-                                    _selectAnswer(
-                                      currentQuestion.id,
-                                      optionIndex.toString(),
-                                    );
-                                  },
-                                  borderRadius: BorderRadius.circular(
-                                    AppTheme.radiusMd,
-                                  ),
-                                  child: AnimatedContainer(
-                                    duration: const Duration(milliseconds: 180),
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 8,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: isSelected
-                                          ? Theme.of(context)
-                                                .colorScheme
-                                                .primary
-                                                .withOpacity(0.08)
-                                          : AppTheme.surfaceMuted,
-                                      borderRadius: BorderRadius.circular(
-                                        AppTheme.radiusMd,
-                                      ),
-                                      border: Border.all(
-                                        color: isSelected
-                                            ? Theme.of(
-                                                context,
-                                              ).colorScheme.primary
-                                            : const Color(0xFFE2E8F0),
-                                        width: isSelected ? 1.4 : 1,
-                                      ),
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        Radio<String>(
-                                          value: optionIndex.toString(),
-                                          groupValue:
-                                              _answers[currentQuestion.id],
-                                          onChanged: (value) {
-                                            if (value != null) {
-                                              _selectAnswer(
-                                                currentQuestion.id,
-                                                value,
-                                              );
-                                            }
-                                          },
-                                        ),
-                                        Expanded(
-                                          child: Text(option.optionText),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              );
-                            }).toList(),
-                          ] else if (currentQuestion.type == 'coding') ...[
-                            Text(
-                              'Write your answer below',
-                              style: Theme.of(context).textTheme.titleMedium,
-                            ),
-                            const SizedBox(height: 12),
-                            TextFormField(
-                              controller: _getCodeController(
-                                currentQuestion.id,
-                              ),
-                              minLines: 10,
-                              maxLines: null,
-                              keyboardType: TextInputType.multiline,
-                              textAlignVertical: TextAlignVertical.top,
-                              decoration: const InputDecoration(
-                                hintText: 'Type your code or explanation here',
-                                alignLabelWithHint: true,
-                              ),
-                              onChanged: (value) {
-                                _answers[currentQuestion.id] = value;
-                              },
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 32),
-
-                    Row(
-                      children: [
-                        if (_currentQuestionIndex > 0)
-                          Expanded(
-                            child: OutlinedButton(
-                              onPressed: (_isLoading || _isSubmittingResponse)
-                                  ? null
-                                  : () async {
-                                      if (currentQuestion.type == 'coding') {
-                                        final saved = await _saveCodingAnswer(
-                                          currentQuestion,
-                                        );
-                                        if (!saved || !mounted) {
-                                          return;
-                                        }
-                                      }
-
-                                      setState(() => _currentQuestionIndex--);
-                                    },
-                              child: const Text('Previous'),
-                            ),
-                          ),
-                        if (_currentQuestionIndex > 0)
-                          const SizedBox(width: 12),
-                        Expanded(
-                          child: _currentQuestionIndex == questions.length - 1
-                              ? ElevatedButton(
-                                  onPressed:
-                                      (_isLoading || _isSubmittingResponse)
-                                      ? null
-                                      : () => _confirmSubmitAttempt(
-                                          currentQuestion: currentQuestion,
-                                        ),
-                                  child: _isLoading
-                                      ? const SizedBox(
-                                          height: 20,
-                                          width: 20,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                          ),
-                                        )
-                                      : const Text('Submit Test'),
-                                )
-                              : ElevatedButton(
-                                  onPressed:
-                                      (_isLoading || _isSubmittingResponse)
-                                      ? null
-                                      : () async {
-                                          if (currentQuestion.type ==
-                                              'coding') {
-                                            final saved =
-                                                await _saveCodingAnswer(
-                                                  currentQuestion,
-                                                );
-                                            if (!saved || !mounted) {
-                                              return;
-                                            }
-                                          }
-
-                                          setState(
-                                            () => _currentQuestionIndex++,
-                                          );
-                                        },
-                                  child: const Text('Next'),
-                                ),
-                        ),
-                      ],
+                    Text(
+                      '${currentQuestion.marks} marks',
+                      style: Theme.of(context).textTheme.titleSmall,
                     ),
                   ],
                 ),
-              );
-            },
+                const SizedBox(height: 8),
+                LinearProgressIndicator(
+                  value: (_currentQuestionIndex + 1) / _questionsCache.length,
+                  minHeight: 8,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ],
+            ),
           ),
-        ),
+          const SizedBox(height: 16),
+
+          // Question content
+          app_widgets.GlassPanel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  currentQuestion.questionText,
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 20),
+                if (currentQuestion.type == 'mcq' &&
+                    currentQuestion.options != null) ...[
+                  ...currentQuestion.options!.asMap().entries.map((entry) {
+                    final optionIndex = entry.key;
+                    final option = entry.value;
+                    final isSelected =
+                        _answers[currentQuestion.id] == optionIndex.toString();
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: InkWell(
+                        onTap: () {
+                          _selectAnswer(
+                            currentQuestion.id,
+                            optionIndex.toString(),
+                          );
+                        },
+                        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isSelected
+                                ? Theme.of(
+                                    context,
+                                  ).colorScheme.primary.withOpacity(0.08)
+                                : AppTheme.surfaceMuted,
+                            borderRadius: BorderRadius.circular(
+                              AppTheme.radiusMd,
+                            ),
+                            border: Border.all(
+                              color: isSelected
+                                  ? Theme.of(context).colorScheme.primary
+                                  : const Color(0xFFE2E8F0),
+                              width: isSelected ? 1.4 : 1,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Radio<String>(
+                                value: optionIndex.toString(),
+                                groupValue: _answers[currentQuestion.id],
+                                onChanged: (value) {
+                                  if (value != null) {
+                                    _selectAnswer(currentQuestion.id, value);
+                                  }
+                                },
+                              ),
+                              Expanded(child: Text(option.optionText)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ] else if (currentQuestion.type == 'coding') ...[
+                  Text(
+                    'Write your answer below',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _getCodeController(currentQuestion.id),
+                    minLines: 10,
+                    maxLines: null,
+                    keyboardType: TextInputType.multiline,
+                    textAlignVertical: TextAlignVertical.top,
+                    decoration: const InputDecoration(
+                      hintText: 'Type your code or explanation here',
+                      alignLabelWithHint: true,
+                    ),
+                    onChanged: (value) {
+                      _answers[currentQuestion.id] = value;
+                    },
+                  ),
+                ],
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 32),
+
+          // Navigation buttons
+          Row(
+            children: [
+              if (_currentQuestionIndex > 0)
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: (_isLoading || _isSubmittingResponse)
+                        ? null
+                        : () async {
+                            if (currentQuestion.type == 'coding') {
+                              final saved = await _saveCodingAnswer(
+                                currentQuestion,
+                              );
+                              if (!saved || !mounted) return;
+                            }
+                            setState(() => _currentQuestionIndex--);
+                          },
+                    child: const Text('Previous'),
+                  ),
+                ),
+              if (_currentQuestionIndex > 0) const SizedBox(width: 12),
+              Expanded(
+                child: _currentQuestionIndex == _questionsCache.length - 1
+                    ? ElevatedButton(
+                        onPressed: (_isLoading || _isSubmittingResponse)
+                            ? null
+                            : () => _confirmSubmitAttempt(
+                                currentQuestion: currentQuestion,
+                              ),
+                        child: _isLoading
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Text('Submit Test'),
+                      )
+                    : ElevatedButton(
+                        onPressed: (_isLoading || _isSubmittingResponse)
+                            ? null
+                            : () async {
+                                if (currentQuestion.type == 'coding') {
+                                  final saved = await _saveCodingAnswer(
+                                    currentQuestion,
+                                  );
+                                  if (!saved || !mounted) return;
+                                }
+                                setState(() => _currentQuestionIndex++);
+                              },
+                        child: const Text('Next'),
+                      ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
