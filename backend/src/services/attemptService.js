@@ -306,6 +306,34 @@ const getAttempt = async (attemptId) => {
 };
 
 // ──────────────────────────────────────────────
+// GET ATTEMPT WITH RESPONSES (for resume/GET endpoint)
+// Returns { attempt, responses, expired } with start_time, duration,
+// and current_question_index for frontend resume.
+// ──────────────────────────────────────────────
+
+const getAttemptWithResponses = async (attemptId) => {
+  const attempt = await fetchAttemptWithDuration(attemptId);
+  const { expired, attempt: checked } = await enforceExpiry(null, attempt);
+
+  if (expired) {
+    return { attempt: checked, responses: [], expired: true };
+  }
+
+  // Fetch responses for state restoration
+  const responsesResult = await db.query(
+    `SELECT id, attempt_id, question_id, selected_option_id, code_answer, is_correct, marks_obtained, grading_status
+     FROM question_responses WHERE attempt_id = $1 ORDER BY created_at ASC`,
+    [attemptId]
+  );
+
+  return {
+    attempt: checked,
+    responses: responsesResult.rows,
+    expired: false,
+  };
+};
+
+// ──────────────────────────────────────────────
 // SUBMIT RESPONSE (with expiry check & question index update)
 // ──────────────────────────────────────────────
 
@@ -611,6 +639,7 @@ const getPendingEvaluations = async () => {
 module.exports = {
   startAttempt,
   getAttempt,
+  getAttemptWithResponses,
   getActiveAttempt,
   submitResponse,
   reviewResponse,
