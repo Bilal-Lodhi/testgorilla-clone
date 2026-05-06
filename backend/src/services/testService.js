@@ -18,6 +18,7 @@ const createTest = async ({
   description,
   duration_minutes,
   created_by,
+  access_code,
   status = TEST_STATUS.DRAFT,
   pass_percentage = 60,
 }) => {
@@ -26,6 +27,13 @@ const createTest = async ({
     throw new ApiError(
       HTTP_STATUS.BAD_REQUEST,
       'Title, duration_minutes, and created_by are required'
+    );
+  }
+
+  if (!access_code || access_code.trim() === '') {
+    throw new ApiError(
+      HTTP_STATUS.BAD_REQUEST,
+      'Access code is required'
     );
   }
 
@@ -52,10 +60,10 @@ const createTest = async ({
 
   try {
     const result = await db.query(
-      `INSERT INTO tests (title, description, duration_minutes, created_by, status, pass_percentage, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+      `INSERT INTO tests (title, description, duration_minutes, created_by, status, pass_percentage, access_code, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
        RETURNING id, title, description, duration_minutes, created_by, status, pass_percentage, total_questions, created_at, updated_at`,
-      [title, description, duration_minutes, created_by, status, pass_percentage]
+      [title, description, duration_minutes, created_by, status, pass_percentage, access_code.trim()]
     );
 
     const test = result.rows[0];
@@ -243,7 +251,7 @@ const updateTest = async (testId, updateData) => {
   await getTestById(testId);
 
   // Build dynamic update query
-  const allowedFields = ['title', 'description', 'duration_minutes', 'status', 'pass_percentage'];
+  const allowedFields = ['title', 'description', 'duration_minutes', 'status', 'pass_percentage', 'access_code'];
   const updates = [];
   const values = [];
   let paramCount = 1;
@@ -364,6 +372,44 @@ const archiveTest = async (testId) => {
   return await updateTest(testId, { status: TEST_STATUS.ARCHIVED });
 };
 
+/**
+ * Verify test access code
+ * @param {string} testId - Test ID
+ * @param {string} code - Access code submitted by candidate
+ * @returns {Promise<boolean>} True if code matches
+ */
+const verifyAccessCode = async (testId, code) => {
+  if (!testId || !code || code.trim() === '') {
+    throw new ApiError(
+      HTTP_STATUS.BAD_REQUEST,
+      'Test ID and access code are required'
+    );
+  }
+
+  const result = await db.query(
+    'SELECT access_code FROM tests WHERE id = $1',
+    [testId]
+  );
+
+  if (result.rows.length === 0) {
+    throw new ApiError(
+      HTTP_STATUS.NOT_FOUND,
+      'Test not found'
+    );
+  }
+
+  const storedCode = result.rows[0].access_code;
+
+  if (storedCode !== code.trim()) {
+    throw new ApiError(
+      HTTP_STATUS.FORBIDDEN,
+      'Invalid access code'
+    );
+  }
+
+  return true;
+};
+
 module.exports = {
   createTest,
   getTestById,
@@ -374,4 +420,5 @@ module.exports = {
   deleteTest,
   publishTest,
   archiveTest,
+  verifyAccessCode,
 };
