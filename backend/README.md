@@ -26,13 +26,19 @@ Edit `.env` with your configuration:
 NODE_ENV=development
 PORT=5000
 
-DB_HOST=localhost
+DB_HOST=<db-host>
 DB_PORT=5432
-DB_NAME=testgorilla
-DB_USER=postgres
-DB_PASSWORD=postgres
+DB_NAME=<db-name>
+DB_USER=<db-user>
+DB_PASSWORD=<db-password>
+DB_SSL=false
+DB_POOL_MIN=2
+DB_POOL_MAX=10
 
-CORS_ORIGIN=http://localhost:3000
+JWT_SECRET=<generate-a-long-random-secret>
+
+CORS_ORIGIN=<allowed-origin-url>
+
 LOG_LEVEL=debug
 ```
 
@@ -99,14 +105,16 @@ src/
 |----------|---------|-------------|
 | NODE_ENV | development | Application environment |
 | PORT | 5000 | Server port |
-| DB_HOST | localhost | Database host |
+| DB_HOST | <db-host> | Database host |
 | DB_PORT | 5432 | Database port |
-| DB_NAME | testgorilla | Database name |
-| DB_USER | postgres | Database user |
-| DB_PASSWORD | postgres | Database password |
+| DB_NAME | <db-name> | Database name |
+| DB_USER | <db-user> | Database user |
+| DB_PASSWORD | <db-password> | Database password |
+| DB_SSL | false | Enable SSL for managed databases |
 | DB_POOL_MIN | 2 | Minimum pool connections |
 | DB_POOL_MAX | 10 | Maximum pool connections |
-| CORS_ORIGIN | http://localhost:3000 | Allowed CORS origins |
+| JWT_SECRET | <generate-a-long-random-secret> | JWT signing secret |
+| CORS_ORIGIN | <allowed-origin-url> | Allowed CORS origins |
 | LOG_LEVEL | debug | Log level (debug, info, warn, error) |
 
 ## Development
