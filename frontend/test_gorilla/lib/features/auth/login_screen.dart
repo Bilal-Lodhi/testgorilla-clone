@@ -15,6 +15,27 @@ class _LoginScreenState extends State<LoginScreen> {
   final _passwordController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _obscurePassword = true;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _errorMessage = null;
+
+    // Clear any stale shared error from the provider
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final authProvider = context.read<AuthProvider>();
+      authProvider.clearError();
+
+      // Handle session expiry message passed via route arguments
+      final args = ModalRoute.of(context)?.settings.arguments;
+      if (args != null && args is String && args.isNotEmpty) {
+        setState(() {
+          _errorMessage = args;
+        });
+      }
+    });
+  }
 
   @override
   void dispose() {
@@ -36,8 +57,16 @@ class _LoginScreenState extends State<LoginScreen> {
         password: _passwordController.text,
       );
 
-      if (success && mounted) {
+      if (!mounted) return;
+
+      if (success) {
         // Navigation will be handled by main.dart based on user role
+      } else {
+        // Capture error locally, then clear from shared provider
+        setState(() {
+          _errorMessage = authProvider.error;
+        });
+        authProvider.clearError();
       }
     }
   }
@@ -88,6 +117,11 @@ class _LoginScreenState extends State<LoginScreen> {
                           controller: _emailController,
                           keyboardType: TextInputType.emailAddress,
                           textInputAction: TextInputAction.next,
+                          onChanged: (_) {
+                            if (_errorMessage != null) {
+                              setState(() => _errorMessage = null);
+                            }
+                          },
                           decoration: InputDecoration(
                             labelText: 'Email',
                             prefixIcon: Icon(Icons.email_outlined),
@@ -113,6 +147,11 @@ class _LoginScreenState extends State<LoginScreen> {
                           obscureText: _obscurePassword,
                           textInputAction: TextInputAction.done,
                           onFieldSubmitted: (_) => _handleLogin(),
+                          onChanged: (_) {
+                            if (_errorMessage != null) {
+                              setState(() => _errorMessage = null);
+                            }
+                          },
                           decoration: InputDecoration(
                             labelText: 'Password',
                             prefixIcon: Icon(Icons.lock_outlined),
@@ -143,25 +182,19 @@ class _LoginScreenState extends State<LoginScreen> {
                         SizedBox(height: 24),
 
                         // Error message
-                        Consumer<AuthProvider>(
-                          builder: (context, authProvider, _) {
-                            if (authProvider.error != null) {
-                              return Container(
-                                padding: EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: Colors.red[50],
-                                  border: Border.all(color: Colors.red),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Text(
-                                  authProvider.error!,
-                                  style: TextStyle(color: Colors.red[700]),
-                                ),
-                              );
-                            }
-                            return SizedBox.shrink();
-                          },
-                        ),
+                        if (_errorMessage != null)
+                          Container(
+                            padding: EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.red[50],
+                              border: Border.all(color: Colors.red),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              _errorMessage!,
+                              style: TextStyle(color: Colors.red[700]),
+                            ),
+                          ),
                         SizedBox(height: 24),
 
                         // Login Button

@@ -19,6 +19,18 @@ class _SignupScreenState extends State<SignupScreen> {
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
   String _selectedRole = 'candidate'; // Default role
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _errorMessage = null;
+
+    // Clear any stale shared error from the provider
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<AuthProvider>().clearError();
+    });
+  }
 
   @override
   void dispose() {
@@ -44,7 +56,9 @@ class _SignupScreenState extends State<SignupScreen> {
         role: _selectedRole,
       );
 
-      if (success && mounted) {
+      if (!mounted) return;
+
+      if (success) {
         // Show success message and navigate back to login
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -58,6 +72,12 @@ class _SignupScreenState extends State<SignupScreen> {
         if (mounted) {
           Navigator.of(context).pop();
         }
+      } else {
+        // Capture error locally, then clear from shared provider
+        setState(() {
+          _errorMessage = authProvider.error;
+        });
+        authProvider.clearError();
       }
     }
   }
@@ -116,6 +136,11 @@ class _SignupScreenState extends State<SignupScreen> {
                           controller: _nameController,
                           keyboardType: TextInputType.name,
                           textInputAction: TextInputAction.next,
+                          onChanged: (_) {
+                            if (_errorMessage != null) {
+                              setState(() => _errorMessage = null);
+                            }
+                          },
                           decoration: InputDecoration(
                             labelText: 'Full Name',
                             prefixIcon: Icon(Icons.person_outlined),
@@ -138,6 +163,11 @@ class _SignupScreenState extends State<SignupScreen> {
                           controller: _emailController,
                           keyboardType: TextInputType.emailAddress,
                           textInputAction: TextInputAction.next,
+                          onChanged: (_) {
+                            if (_errorMessage != null) {
+                              setState(() => _errorMessage = null);
+                            }
+                          },
                           decoration: InputDecoration(
                             labelText: 'Email',
                             prefixIcon: Icon(Icons.email_outlined),
@@ -162,6 +192,11 @@ class _SignupScreenState extends State<SignupScreen> {
                           controller: _passwordController,
                           obscureText: _obscurePassword,
                           textInputAction: TextInputAction.next,
+                          onChanged: (_) {
+                            if (_errorMessage != null) {
+                              setState(() => _errorMessage = null);
+                            }
+                          },
                           decoration: InputDecoration(
                             labelText: 'Password',
                             prefixIcon: Icon(Icons.lock_outlined),
@@ -197,6 +232,11 @@ class _SignupScreenState extends State<SignupScreen> {
                           obscureText: _obscureConfirmPassword,
                           textInputAction: TextInputAction.done,
                           onFieldSubmitted: (_) => _handleSignup(),
+                          onChanged: (_) {
+                            if (_errorMessage != null) {
+                              setState(() => _errorMessage = null);
+                            }
+                          },
                           decoration: InputDecoration(
                             labelText: 'Confirm Password',
                             prefixIcon: Icon(Icons.lock_outlined),
@@ -275,31 +315,25 @@ class _SignupScreenState extends State<SignupScreen> {
                         SizedBox(height: 24),
 
                         // Error message
-                        Consumer<AuthProvider>(
-                          builder: (context, authProvider, _) {
-                            if (authProvider.error != null) {
-                              return Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  Container(
-                                    padding: EdgeInsets.all(12),
-                                    decoration: BoxDecoration(
-                                      color: Colors.red[50],
-                                      border: Border.all(color: Colors.red),
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Text(
-                                      authProvider.error!,
-                                      style: TextStyle(color: Colors.red[700]),
-                                    ),
-                                  ),
-                                  SizedBox(height: 16),
-                                ],
-                              );
-                            }
-                            return SizedBox.shrink();
-                          },
-                        ),
+                        if (_errorMessage != null)
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Container(
+                                padding: EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.red[50],
+                                  border: Border.all(color: Colors.red),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  _errorMessage!,
+                                  style: TextStyle(color: Colors.red[700]),
+                                ),
+                              ),
+                              SizedBox(height: 16),
+                            ],
+                          ),
 
                         // Signup Button
                         Consumer<AuthProvider>(
