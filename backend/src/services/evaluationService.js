@@ -320,11 +320,30 @@ const getResult = async (attemptId) => {
 
   const breakdown = breakdownResult.rows[0] || {};
 
+  // Get individual question responses with review data for the candidate
+  const responsesResult = await db.query(
+    `SELECT q.id AS question_id, q.question_text, q.type, q.marks AS max_marks,
+            qr.id AS response_id, qr.code_answer, qr.selected_option_id,
+            qr.is_correct, qr.marks_obtained, qr.grading_status,
+            qr.review_notes, qr.reviewed_by, qr.reviewed_at,
+            mo.option_text AS selected_option_text
+     FROM questions q
+     LEFT JOIN question_responses qr
+       ON qr.question_id = q.id AND qr.attempt_id = $1
+     LEFT JOIN mcq_options mo ON mo.id = qr.selected_option_id
+     WHERE q.test_id = $2
+     ORDER BY q.order_index`,
+    [attemptId, attempt.test_id]
+  );
+
+  const responses = responsesResult.rows;
+
   return {
     result,
     attempt,
     test,
     breakdown,
+    responses,
   };
 };
 
