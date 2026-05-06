@@ -3,6 +3,7 @@ const testController = require('../controllers/testController');
 const attemptController = require('../controllers/attemptController');
 const { authenticateToken, adminOnly } = require('../middleware/authMiddleware');
 const { asyncHandler } = require('../middleware/errorHandler');
+const { accessCodeRateLimiter } = require('../middleware/rateLimiter');
 
 const router = express.Router();
 
@@ -81,6 +82,17 @@ router.patch(
   authenticateToken,
   adminOnly,
   asyncHandler(testController.archiveTest)
+);
+
+/**
+ * POST /api/v1/tests/:id/verify-access
+ * Verify access code before candidate starts test
+ */
+router.post(
+  '/:id/verify-access',
+  authenticateToken,
+  accessCodeRateLimiter(),
+  asyncHandler(testController.verifyAccessCode)
 );
 
 /**
