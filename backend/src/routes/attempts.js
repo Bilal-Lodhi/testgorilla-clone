@@ -18,6 +18,19 @@ router.get(
 );
 
 /**
+ * GET /api/v1/attempts/active
+ * Get active attempt for current user (resume endpoint)
+ * Candidate only
+ * IMPORTANT: Must be defined BEFORE /:attemptId to avoid route conflict
+ */
+router.get(
+  '/active',
+  authenticateToken,
+  candidateOnly,
+  asyncHandler(attemptController.getActiveAttempt)
+);
+
+/**
  * POST /api/v1/tests/:testId/attempts
  * Start a test attempt (Candidate only)
  * Mounted with mergeParams to inherit :testId from parent route
