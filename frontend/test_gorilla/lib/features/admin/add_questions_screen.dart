@@ -272,12 +272,14 @@ class _AddQuestionsScreenState extends State<AddQuestionsScreen> {
         child: app_widgets.AppPageScaffold(
           maxContentWidth: 860,
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               // Existing Questions Section
               if (_existingQuestions.isNotEmpty) ...[
                 app_widgets.GlassPanel(
                   child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
@@ -507,6 +509,7 @@ class _AddQuestionsScreenState extends State<AddQuestionsScreen> {
               // Add New Question Section
               app_widgets.GlassPanel(
                 child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
@@ -589,6 +592,7 @@ class _AddQuestionsScreenState extends State<AddQuestionsScreen> {
                 const SizedBox(height: 16),
                 app_widgets.GlassPanel(
                   child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
