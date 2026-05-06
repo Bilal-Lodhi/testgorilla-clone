@@ -62,7 +62,6 @@ class _AddQuestionsScreenState extends State<AddQuestionsScreen> {
   bool _isLoading = false;
   String? _error;
   List<Question> _existingQuestions = [];
-  bool _showExistingQuestions = true;
 
   @override
   void initState() {
@@ -83,8 +82,13 @@ class _AddQuestionsScreenState extends State<AddQuestionsScreen> {
       final response = await _apiClient.get(
         ApiConstants.questions(widget.testId),
       );
+
       if (response['data'] is List) {
         final questions = response['data'] as List;
+        if (!mounted) {
+          return;
+        }
+
         setState(() {
           _existingQuestions = questions
               .map((q) => Question.fromJson(q as Map<String, dynamic>))
@@ -102,59 +106,6 @@ class _AddQuestionsScreenState extends State<AddQuestionsScreen> {
       }
     } catch (_) {
       // Ignore preload errors and continue from zero.
-    }
-  }
-
-  Future<void> _deleteQuestion(String questionId) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('Delete Question'),
-          content: const Text(
-            'Are you sure you want to delete this question? This action cannot be undone.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              style: TextButton.styleFrom(foregroundColor: Colors.red),
-              child: const Text('Delete'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (confirmed != true) {
-      return;
-    }
-
-    try {
-      await _apiClient.delete(
-        '${ApiConstants.tests}/${widget.testId}/questions/$questionId',
-      );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Question deleted successfully'),
-            backgroundColor: Colors.green,
-          ),
-        );
-        await _loadExistingQuestions();
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to delete question: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
     }
   }
 
@@ -188,8 +139,9 @@ class _AddQuestionsScreenState extends State<AddQuestionsScreen> {
         options = [];
 
         for (int i = 0; i < 4; i++) {
-          if (_optionControllers[i].text.isNotEmpty) {
-            options.add(_optionControllers[i].text.trim());
+          final value = _optionControllers[i].text.trim();
+          if (value.isNotEmpty) {
+            options.add(value);
             if (_correctAnswers[i]) {
               correctOptionIndex = i;
             }
@@ -275,238 +227,6 @@ class _AddQuestionsScreenState extends State<AddQuestionsScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Existing Questions Section
-              if (_existingQuestions.isNotEmpty) ...[
-                app_widgets.GlassPanel(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Questions Added',
-                                style: Theme.of(context).textTheme.titleLarge,
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                '${_existingQuestions.length} question${_existingQuestions.length == 1 ? '' : 's'} added',
-                                style: Theme.of(context).textTheme.bodySmall
-                                    ?.copyWith(color: const Color(0xFF64748B)),
-                              ),
-                            ],
-                          ),
-                          IconButton(
-                            icon: Icon(
-                              _showExistingQuestions
-                                  ? Icons.expand_less
-                                  : Icons.expand_more,
-                            ),
-                            onPressed: () {
-                              setState(() {
-                                _showExistingQuestions =
-                                    !_showExistingQuestions;
-                              });
-                            },
-                          ),
-                        ],
-                      ),
-                      if (_showExistingQuestions) ...[
-                        const SizedBox(height: 16),
-                        ListView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          itemCount: _existingQuestions.length,
-                          itemBuilder: (context, index) {
-                            final question = _existingQuestions[index];
-                            return Container(
-                              margin: const EdgeInsets.only(bottom: 12),
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: AppTheme.surfaceMuted,
-                                borderRadius: BorderRadius.circular(
-                                  AppTheme.radiusMd,
-                                ),
-                                border: Border.all(
-                                  color: Colors.grey.withOpacity(0.2),
-                                ),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 8,
-                                          vertical: 4,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: Colors.blue.withOpacity(0.1),
-                                          borderRadius: BorderRadius.circular(
-                                            4,
-                                          ),
-                                        ),
-                                        child: Text(
-                                          'Q${question.orderIndex + 1}',
-                                          style: const TextStyle(
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w600,
-                                            color: Colors.blue,
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              question.questionText,
-                                              style: Theme.of(context)
-                                                  .textTheme
-                                                  .bodyMedium
-                                                  ?.copyWith(
-                                                    fontWeight: FontWeight.w500,
-                                                  ),
-                                              maxLines: 2,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                            const SizedBox(height: 4),
-                                            Row(
-                                              children: [
-                                                Container(
-                                                  padding:
-                                                      const EdgeInsets.symmetric(
-                                                        horizontal: 6,
-                                                        vertical: 2,
-                                                      ),
-                                                  decoration: BoxDecoration(
-                                                    color: Colors.grey
-                                                        .withOpacity(0.2),
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          3,
-                                                        ),
-                                                  ),
-                                                  child: Text(
-                                                    question.type.toUpperCase(),
-                                                    style: Theme.of(
-                                                      context,
-                                                    ).textTheme.labelSmall,
-                                                  ),
-                                                ),
-                                                const SizedBox(width: 8),
-                                                Text(
-                                                  '${question.marks} mark${question.marks == 1 ? '' : 's'}',
-                                                  style: Theme.of(
-                                                    context,
-                                                  ).textTheme.labelSmall,
-                                                ),
-                                              ],
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      IconButton(
-                                        icon: const Icon(
-                                          Icons.delete_outline,
-                                          color: Colors.red,
-                                          size: 20,
-                                        ),
-                                        onPressed: () =>
-                                            _deleteQuestion(question.id),
-                                        tooltip: 'Delete Question',
-                                        constraints: const BoxConstraints(),
-                                        padding: EdgeInsets.zero,
-                                      ),
-                                    ],
-                                  ),
-                                  if (question.options != null &&
-                                      question.options!.isNotEmpty) ...[
-                                    const SizedBox(height: 8),
-                                    Text(
-                                      'Options:',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .labelSmall
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    ...question.options!.asMap().entries.map((
-                                      entry,
-                                    ) {
-                                      final idx = entry.key;
-                                      final option = entry.value;
-                                      final isCorrect =
-                                          idx == question.correctOption;
-                                      return Padding(
-                                        padding: const EdgeInsets.only(top: 2),
-                                        child: Row(
-                                          children: [
-                                            Text(
-                                              '${String.fromCharCode(65 + idx)}.',
-                                              style: Theme.of(context)
-                                                  .textTheme
-                                                  .bodySmall
-                                                  ?.copyWith(
-                                                    fontWeight: FontWeight.w600,
-                                                  ),
-                                            ),
-                                            const SizedBox(width: 6),
-                                            Expanded(
-                                              child: Text(
-                                                option,
-                                                style: Theme.of(context)
-                                                    .textTheme
-                                                    .bodySmall
-                                                    ?.copyWith(
-                                                      color: isCorrect
-                                                          ? Colors.green
-                                                          : null,
-                                                      fontWeight: isCorrect
-                                                          ? FontWeight.w600
-                                                          : null,
-                                                    ),
-                                              ),
-                                            ),
-                                            if (isCorrect)
-                                              const Padding(
-                                                padding: EdgeInsets.only(
-                                                  left: 8,
-                                                ),
-                                                child: Icon(
-                                                  Icons.check_circle,
-                                                  size: 16,
-                                                  color: Colors.green,
-                                                ),
-                                              ),
-                                          ],
-                                        ),
-                                      );
-                                    }),
-                                  ],
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 24),
-              ],
-              // Add New Question Section
               app_widgets.GlassPanel(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
