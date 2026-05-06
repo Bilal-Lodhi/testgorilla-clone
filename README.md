@@ -245,11 +245,14 @@ NODE_ENV=development
 PORT=5000
 
 # PostgreSQL
-DB_HOST=localhost
+DB_HOST=<db-host>
 DB_PORT=5432
-DB_NAME=testgorilla
+DB_NAME=<db-name>
 DB_USER=<your_db_user>
 DB_PASSWORD=<your_db_password>
+DB_SSL=false
+DB_POOL_MIN=2
+DB_POOL_MAX=10
 
 # JWT
 JWT_SECRET=<generate-a-long-random-secret>
