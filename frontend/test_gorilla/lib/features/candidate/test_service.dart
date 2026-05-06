@@ -47,13 +47,45 @@ class TestService {
     }
   }
 
-  /// Start test attempt
-  Future<TestAttempt> startAttempt(String testId) async {
+  /// Start test attempt (requires access_code for server-side verification)
+  Future<Map<String, dynamic>> startAttempt(
+    String testId, {
+    required String accessCode,
+  }) async {
     try {
-      final response = await apiClient.post(ApiConstants.startAttempt(testId));
-      final data = response['data'] as Map<String, dynamic>;
-      return TestAttempt.fromJson(data['attempt'] as Map<String, dynamic>);
+      final response = await apiClient.post(
+        ApiConstants.startAttempt(testId),
+        body: {'access_code': accessCode},
+      );
+      return response['data'] as Map<String, dynamic>;
     } catch (e) {
+      rethrow;
+    }
+  }
+
+  /// Get a single attempt by id — returns full resume payload:
+  /// { attempt, current_question_index, start_time, duration }
+  Future<Map<String, dynamic>> getAttempt(String attemptId) async {
+    try {
+      final response = await apiClient.get(ApiConstants.getAttempt(attemptId));
+      return response['data'] as Map<String, dynamic>;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  /// Get the active (in_progress) attempt for the currently logged-in user.
+  /// Returns null if no active attempt exists.
+  Future<Map<String, dynamic>?> getActiveAttempt() async {
+    try {
+      final response = await apiClient.get(ApiConstants.activeAttempt);
+      final data = response['data'];
+      if (data is Map<String, dynamic> && data.isNotEmpty) {
+        return data;
+      }
+      return null;
+    } catch (e) {
+      // 404 means no active attempt — expected, not an error
       rethrow;
     }
   }
@@ -74,6 +106,19 @@ class TestService {
           if (codeAnswer != null) 'codeAnswer': codeAnswer,
         },
       );
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  /// Verify test access code before starting
+  Future<bool> verifyAccessCode(String testId, String accessCode) async {
+    try {
+      final response = await apiClient.post(
+        ApiConstants.verifyAccess(testId),
+        body: {'access_code': accessCode},
+      );
+      return response?['data']?['verified'] == true;
     } catch (e) {
       rethrow;
     }
