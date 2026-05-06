@@ -30,6 +30,9 @@ const startAttempt = async (req, res, next) => {
       );
     }
 
+    // Enforce access code verification server-side
+    await testService.verifyAccessCode(testId, req.body.access_code);
+
     const result = await attemptService.startAttempt(testId, userId);
 
     res.status(HTTP_STATUS.CREATED).json({
