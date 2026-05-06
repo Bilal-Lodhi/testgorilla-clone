@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:test_gorilla/core/api/api_client.dart';
+import 'package:test_gorilla/core/storage/access_code_storage.dart';
 import 'package:test_gorilla/features/shared/models/models.dart';
 import 'package:test_gorilla/features/shared/widgets/app_widgets.dart'
     as app_widgets;
@@ -152,46 +153,132 @@ class _TestListScreenState extends State<TestListScreen> {
   }
 
   Future<void> _startTest(Test test) async {
+    // Check local storage first — skip dialog if already verified
+    final storedCode = await AccessCodeStorage.getCode(test.id);
+
+    if (storedCode != null && storedCode.isNotEmpty) {
+      // Already verified — go straight to attempt
+      if (!mounted) return;
+      await Navigator.of(context).pushNamed(
+        '/candidate/attempt',
+        arguments: {'test': test, 'accessCode': storedCode},
+      );
+
+      if (mounted) {
+        setState(() {
+          _loadTests();
+        });
+        widget.onAttemptFlowCompleted?.call();
+      }
+      return;
+    }
+
+    // Not verified yet — show access code dialog
+    _showAccessCodeDialog(test);
+  }
+
+  void _showAccessCodeDialog(Test test) {
+    final accessCodeController = TextEditingController();
+    String? errorMessage;
+    bool isVerifying = false;
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Start Test: ${test.title}'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Duration: ${test.durationMinutes} minutes'),
-              Text('Questions: ${test.totalQuestions}'),
-              Text('Pass Percentage: ${test.passPercentage}%'),
-              const SizedBox(height: 12),
-              const Text('Are you ready to start?'),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              await Navigator.of(
-                context,
-              ).pushNamed('/candidate/attempt', arguments: test);
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: Text('Enter Access Code: ${test.title}'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('This test requires an access code to start.'),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Duration: ${test.durationMinutes} min  •  Questions: ${test.totalQuestions}  •  Pass: ${test.passPercentage}%',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: accessCodeController,
+                      decoration: InputDecoration(
+                        labelText: 'Access Code',
+                        prefixIcon: const Icon(Icons.lock_outline),
+                        errorText: errorMessage,
+                      ),
+                      enabled: !isVerifying,
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isVerifying
+                      ? null
+                      : () => Navigator.pop(dialogContext),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: isVerifying
+                      ? null
+                      : () async {
+                          final code = accessCodeController.text.trim();
+                          if (code.isEmpty) {
+                            setDialogState(() {
+                              errorMessage = 'Please enter the access code';
+                            });
+                            return;
+                          }
 
-              if (mounted) {
-                setState(() {
-                  _loadTests();
-                });
-                widget.onAttemptFlowCompleted?.call();
-              }
-            },
-            child: const Text('Start'),
-          ),
-        ],
-      ),
+                          setDialogState(() {
+                            isVerifying = true;
+                            errorMessage = null;
+                          });
+
+                          try {
+                            await _testService.verifyAccessCode(test.id, code);
+
+                            // Persist verified code locally so candidate doesn't
+                            // need to re-enter after page refresh
+                            await AccessCodeStorage.setCode(test.id, code);
+
+                            if (!mounted) return;
+                            Navigator.pop(dialogContext);
+                            await Navigator.of(this.context).pushNamed(
+                              '/candidate/attempt',
+                              arguments: {'test': test, 'accessCode': code},
+                            );
+
+                            if (mounted) {
+                              setState(() {
+                                _loadTests();
+                              });
+                              widget.onAttemptFlowCompleted?.call();
+                            }
+                          } catch (e) {
+                            if (!mounted) return;
+                            setDialogState(() {
+                              isVerifying = false;
+                              errorMessage = 'Invalid access code. Try again.';
+                            });
+                          }
+                        },
+                  child: isVerifying
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Verify & Start'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 }
