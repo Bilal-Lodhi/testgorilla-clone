@@ -8,7 +8,7 @@ const { HTTP_STATUS } = require('../utils/constants');
  */
 const createTest = async (req, res, next) => {
   try {
-    const { title, description, duration_minutes, status, pass_percentage } = req.body;
+    const { title, description, duration_minutes, status, pass_percentage, access_code } = req.body;
 
     const test = await testService.createTest({
       title,
@@ -16,6 +16,7 @@ const createTest = async (req, res, next) => {
       duration_minutes,
       status,
       pass_percentage,
+      access_code,
       created_by: req.user.id, // From JWT token
     });
 
@@ -196,6 +197,37 @@ const archiveTest = async (req, res, next) => {
   }
 };
 
+/**
+ * Verify test access code (candidates submit code before starting)
+ * POST /api/v1/tests/:id/verify-access
+ * Protected: requires authentication
+ */
+const verifyAccessCode = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { access_code } = req.body;
+
+    const verified = await testService.verifyAccessCode(id, access_code);
+
+    // Record success for rate limiting
+    if (req._rateLimitRecordSuccess) {
+      req._rateLimitRecordSuccess();
+    }
+
+    res.status(HTTP_STATUS.OK).json({
+      success: true,
+      message: 'Access code verified successfully',
+      data: { verified },
+    });
+  } catch (error) {
+    // Record failure for rate limiting (but not for validation errors like missing params)
+    if (req._rateLimitRecordFailure && error.statusCode === HTTP_STATUS.FORBIDDEN) {
+      req._rateLimitRecordFailure();
+    }
+    next(error);
+  }
+};
+
 module.exports = {
   createTest,
   getAllTests,
@@ -204,4 +236,5 @@ module.exports = {
   deleteTest,
   publishTest,
   archiveTest,
+  verifyAccessCode,
 };
