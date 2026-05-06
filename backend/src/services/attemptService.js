@@ -4,193 +4,339 @@ const { HTTP_STATUS, QUESTION_TYPES } = require('../utils/constants');
 const logger = require('../utils/logger');
 const evaluationService = require('./evaluationService');
 
+// ═══════════════════════════════════════════════════════════
+// BACKEND IS SOURCE OF TRUTH FOR:
+//   - attempt state (in_progress / submitted / expired)
+//   - current_question_index (resume position)
+//   - start_time + duration = endTime (timing)
+//
+// Expiry enforcement:
+//   On EVERY attempt-related request, check now vs endTime.
+//   If expired → auto-submit → return completed state.
+// ═══════════════════════════════════════════════════════════
+
+// ──────────────────────────────────────────────
+// EXPIRY ENFORCEMENT
+// ──────────────────────────────────────────────
+
 /**
- * Start a test attempt - candidate begins taking a test
- * @param {string} testId - Test ID
- * @param {string} userId - User ID (candidate)
- * @returns {Promise<Object>} Created attempt with questions
+ * Check if an in-progress attempt has expired.
+ * If expired, auto-submit (evaluate) and return updated state.
+ *
+ * @param {Object} client - DB client (if inside a transaction)
+ * @param {Object} attempt - Attempt row with t.duration_minutes
+ * @returns {{ expired: boolean, attempt: Object }}
  */
-const startAttempt = async (testId, userId) => {
-  try {
-    const client = await db.getClient();
+const enforceExpiry = async (client, attempt) => {
+  if (attempt.status !== 'in_progress') {
+    return { expired: false, attempt };
+  }
 
+  const startTime = new Date(attempt.start_time);
+  const now = new Date();
+  const durationMinutes = attempt.duration_minutes || 60;
+  const endTime = new Date(startTime.getTime() + durationMinutes * 60 * 1000);
+
+  if (now < endTime) {
+    // Not expired: attach computed timing fields
+    const remainingMs = endTime.getTime() - now.getTime();
+    return {
+      expired: false,
+      attempt: {
+        ...attempt,
+        remainingSeconds: Math.max(0, Math.floor(remainingMs / 1000)),
+        endTime: endTime.toISOString(),
+        serverNow: now.toISOString(),
+      },
+    };
+  }
+
+  // ── EXPIRED → auto-submit ──
+  logger.warn('Attempt expired – auto-submitting', {
+    attemptId: attempt.id,
+    startTime: attempt.start_time,
+    durationMinutes,
+  });
+
+  const pool = client || db;
+  const hasExternalTx = !!client;
+
+  if (!hasExternalTx) {
+    const ac = await db.getClient();
     try {
-      await client.query('BEGIN');
+      await ac.query('BEGIN');
 
-      // Check if user already has an active attempt for this test
-      const existingAttempt = await client.query(
-        `SELECT id FROM test_attempts 
-         WHERE test_id = $1 AND user_id = $2 AND status = 'in_progress'`,
+      await ac.query(
+        `UPDATE test_attempts
+         SET status = 'submitted', end_time = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1 AND status = 'in_progress'`,
+        [attempt.id]
+      );
+
+      const metrics = await evaluationService.calculateAttemptMetrics(ac, attempt.id);
+      await ac.query(
+        `INSERT INTO results (attempt_id, test_id, user_id, total_marks, obtained_marks, percentage, passed)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT DO NOTHING`,
+        [attempt.id, attempt.test_id, attempt.user_id, metrics.totalMarks, metrics.obtainedMarks, metrics.percentage, metrics.passed]
+      );
+
+      await ac.query('COMMIT');
+
+      attempt.status = 'submitted';
+      attempt.end_time = new Date().toISOString();
+      attempt.remainingSeconds = 0;
+      attempt.serverNow = new Date().toISOString();
+      return { expired: true, attempt: { ...attempt, expired: true } };
+    } catch (err) {
+      await ac.query('ROLLBACK');
+      logger.error('Auto-submit on expiry failed', { error: err.message, attemptId: attempt.id });
+      throw err;
+    } finally {
+      ac.release();
+    }
+  }
+
+  // Inside existing transaction – just update status, caller will commit
+  await pool.query(
+    `UPDATE test_attempts
+     SET status = 'submitted', end_time = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+     WHERE id = $1 AND status = 'in_progress'`,
+    [attempt.id]
+  );
+  attempt.status = 'submitted';
+  attempt.end_time = new Date().toISOString();
+  attempt.remainingSeconds = 0;
+  attempt.serverNow = new Date().toISOString();
+  return { expired: true, attempt: { ...attempt, expired: true } };
+};
+
+// ──────────────────────────────────────────────
+// FETCH ATTEMPT WITH TEST DURATION
+// ──────────────────────────────────────────────
+
+const fetchAttemptWithDuration = async (attemptId, clientParam = null) => {
+  const pool = clientParam || db;
+  const result = await pool.query(
+    `SELECT a.id, a.test_id, a.user_id, a.start_time, a.end_time, a.status, a.score,
+            a.current_question_index, a.created_at, a.updated_at,
+            t.duration_minutes, t.title AS test_title
+     FROM test_attempts a
+     JOIN tests t ON a.test_id = t.id
+     WHERE a.id = $1`,
+    [attemptId]
+  );
+  if (result.rows.length === 0) {
+    throw new ApiError(HTTP_STATUS.NOT_FOUND, 'Attempt not found');
+  }
+  return result.rows[0];
+};
+
+// ──────────────────────────────────────────────
+// START ATTEMPT (idempotent – resume if active)
+// ──────────────────────────────────────────────
+
+const startAttempt = async (testId, userId) => {
+  const client = await db.getClient();
+  try {
+    await client.query('BEGIN');
+
+    const existing = await client.query(
+      `SELECT a.id, a.test_id, a.user_id, a.start_time, a.end_time, a.status, a.score,
+              a.current_question_index, a.created_at, a.updated_at,
+              t.duration_minutes
+       FROM test_attempts a
+       JOIN tests t ON a.test_id = t.id
+       WHERE a.test_id = $1 AND a.user_id = $2 AND a.status = 'in_progress'`,
+      [testId, userId]
+    );
+
+    let attempt;
+
+    if (existing.rows.length > 0) {
+      attempt = existing.rows[0];
+      const { expired, attempt: checked } = await enforceExpiry(client, attempt);
+
+      if (expired) {
+        await client.query('COMMIT');
+        return { attempt: checked, questions: [], responses: [], resumed: false, expired: true };
+      }
+
+      attempt = checked;
+    } else {
+      const newAttempt = await client.query(
+        `INSERT INTO test_attempts (test_id, user_id, start_time, status, current_question_index)
+         VALUES ($1, $2, CURRENT_TIMESTAMP, 'in_progress', 0)
+         RETURNING id, test_id, user_id, start_time, end_time, status, score, current_question_index, created_at, updated_at`,
         [testId, userId]
       );
-
-      if (existingAttempt.rows.length > 0) {
-        throw new ApiError(
-          HTTP_STATUS.CONFLICT,
-          'You already have an active attempt for this test'
-        );
-      }
-
-      // Create new attempt
-      let attempt;
-      try {
-        const attemptResult = await client.query(
-          `INSERT INTO test_attempts (test_id, user_id, start_time, status)
-           VALUES ($1, $2, CURRENT_TIMESTAMP, 'in_progress')
-           RETURNING id, test_id, user_id, start_time, end_time, status, score, created_at, updated_at`,
-          [testId, userId]
-        );
-
-        attempt = attemptResult.rows[0];
-      } catch (dbError) {
-        // Handle unique constraint violation (23505 = unique_violation in PostgreSQL)
-        if (dbError.code === '23505') {
-          throw new ApiError(
-            HTTP_STATUS.CONFLICT,
-            'You have already attempted this test'
-          );
-        }
-        // Re-throw other database errors
-        throw dbError;
-      }
-
-      // Fetch all questions for the test
-      const questionsResult = await client.query(
-        `SELECT id, test_id, type, question_text, marks, order_index
-         FROM questions WHERE test_id = $1 ORDER BY order_index ASC`,
-        [testId]
-      );
-
-      const questions = questionsResult.rows;
-
-      // For each MCQ question, fetch its options
-      for (let question of questions) {
-        if (question.type === 'mcq') {
-          const optionsResult = await client.query(
-            `SELECT id, question_id, option_text, order_index
-             FROM mcq_options WHERE question_id = $1 ORDER BY order_index`,
-            [question.id]
-          );
-          question.options = optionsResult.rows;
-        } else {
-          question.options = [];
-        }
-      }
-
-      await client.query('COMMIT');
-
-      logger.info('Test attempt started', {
-        attemptId: attempt.id,
-        testId,
-        userId,
-      });
-
-      return {
-        attempt,
-        questions,
-      };
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
+      attempt = newAttempt.rows[0];
+      attempt.duration_minutes = (await db.query('SELECT duration_minutes FROM tests WHERE id = $1', [testId])).rows[0].duration_minutes;
+      const { expired, attempt: checked } = await enforceExpiry(client, attempt);
+      attempt = checked;
     }
+
+    // Fetch questions
+    const questionsResult = await client.query(
+      `SELECT id, test_id, type, question_text, marks, order_index
+       FROM questions WHERE test_id = $1 ORDER BY order_index ASC`,
+      [testId]
+    );
+    const questions = questionsResult.rows;
+    for (let q of questions) {
+      if (q.type === 'mcq') {
+        const opts = await client.query(
+          `SELECT id, question_id, option_text, order_index FROM mcq_options WHERE question_id = $1 ORDER BY order_index`,
+          [q.id]
+        );
+        q.options = opts.rows;
+      } else {
+        q.options = [];
+      }
+    }
+
+    // Fetch previous responses for state restoration
+    const responsesResult = await client.query(
+      `SELECT id, attempt_id, question_id, selected_option_id, code_answer, is_correct, marks_obtained, grading_status
+       FROM question_responses WHERE attempt_id = $1`,
+      [attempt.id]
+    );
+
+    await client.query('COMMIT');
+
+    const isResume = existing.rows.length > 0;
+    logger.info(isResume ? 'Resuming active attempt' : 'Test attempt started', {
+      attemptId: attempt.id, testId, userId, questionIndex: attempt.current_question_index,
+    });
+
+    return {
+      attempt,
+      questions,
+      responses: responsesResult.rows,
+      resumed: isResume,
+    };
   } catch (error) {
-    logger.error('Error starting test attempt', { error: error.message });
+    await client.query('ROLLBACK').catch(() => {});
+    logger.error('Error starting/resuming attempt', { error: error.message });
     throw error;
+  } finally {
+    client.release();
   }
 };
 
-/**
- * Get attempt details
- * @param {string} attemptId - Attempt ID
- * @returns {Promise<Object>} Attempt with responses
- */
-const getAttempt = async (attemptId) => {
-  const attemptResult = await db.query(
-    `SELECT id, test_id, user_id, start_time, end_time, status, score, created_at, updated_at
-     FROM test_attempts WHERE id = $1`,
-    [attemptId]
+// ──────────────────────────────────────────────
+// GET ACTIVE ATTEMPT FOR USER
+// ──────────────────────────────────────────────
+
+const getActiveAttempt = async (userId) => {
+  const result = await db.query(
+    `SELECT a.id, a.test_id, a.user_id, a.start_time, a.end_time, a.status, a.score,
+            a.current_question_index, a.created_at, a.updated_at,
+            t.duration_minutes, t.title AS test_title
+     FROM test_attempts a
+     JOIN tests t ON a.test_id = t.id
+     WHERE a.user_id = $1 AND a.status = 'in_progress'
+     ORDER BY a.start_time DESC
+     LIMIT 1`,
+    [userId]
   );
 
-  if (attemptResult.rows.length === 0) {
-    throw new ApiError(
-      HTTP_STATUS.NOT_FOUND,
-      'Attempt not found'
-    );
+  if (result.rows.length === 0) {
+    return null;
   }
 
-  const attempt = attemptResult.rows[0];
+  const attempt = result.rows[0];
+  const { expired, attempt: checked } = await enforceExpiry(null, attempt);
 
-  // Get all responses for this attempt
+  if (expired) {
+    return { attempt: checked, expired: true };
+  }
+
+  // Fetch responses for state restoration
   const responsesResult = await db.query(
-    `SELECT id, attempt_id, question_id, selected_option_id, code_answer, is_correct, marks_obtained, grading_status, reviewed_by, reviewed_at, review_notes, created_at, updated_at
+    `SELECT id, attempt_id, question_id, selected_option_id, code_answer, is_correct, marks_obtained, grading_status
+     FROM question_responses WHERE attempt_id = $1`,
+    [attempt.id]
+  );
+
+  // Fetch questions
+  const questionsResult = await db.query(
+    `SELECT id, test_id, type, question_text, marks, order_index
+     FROM questions WHERE test_id = $1 ORDER BY order_index ASC`,
+    [attempt.test_id]
+  );
+  const questions = questionsResult.rows;
+  for (let q of questions) {
+    if (q.type === 'mcq') {
+      const opts = await db.query(
+        `SELECT id, question_id, option_text, order_index FROM mcq_options WHERE question_id = $1 ORDER BY order_index`,
+        [q.id]
+      );
+      q.options = opts.rows;
+    } else {
+      q.options = [];
+    }
+  }
+
+  return {
+    attempt: checked,
+    questions,
+    responses: responsesResult.rows,
+    expired: false,
+  };
+};
+
+// ──────────────────────────────────────────────
+// GET ATTEMPT BY ID (with expiry check)
+// ──────────────────────────────────────────────
+
+const getAttempt = async (attemptId) => {
+  const attempt = await fetchAttemptWithDuration(attemptId);
+  const { attempt: checked } = await enforceExpiry(null, attempt);
+
+  // Fetch responses
+  const responsesResult = await db.query(
+    `SELECT id, attempt_id, question_id, selected_option_id, code_answer, is_correct, marks_obtained, grading_status
      FROM question_responses WHERE attempt_id = $1 ORDER BY created_at ASC`,
     [attemptId]
   );
 
-  attempt.responses = responsesResult.rows;
-
-  return attempt;
+  checked.responses = responsesResult.rows;
+  return checked;
 };
 
-/**
- * Submit an answer to a question
- * @param {string} attemptId - Attempt ID
- * @param {string} questionId - Question ID
- * @param {number} selectedOption - Selected MCQ option index (0-based, for MCQ)
- * @param {string} codeAnswer - Code submission (for Coding or Essay)
- * @returns {Promise<Object>} Saved response
- */
+// ──────────────────────────────────────────────
+// SUBMIT RESPONSE (with expiry check & question index update)
+// ──────────────────────────────────────────────
+
 const submitResponse = async (attemptId, questionId, selectedOption = null, codeAnswer = null) => {
   const client = await db.getClient();
-
   try {
     await client.query('BEGIN');
 
-    // Verify attempt exists and is in progress
-    const attemptResult = await client.query(
-      `SELECT id, test_id, user_id, start_time, status FROM test_attempts WHERE id = $1`,
-      [attemptId]
-    );
+    const attempt = await fetchAttemptWithDuration(attemptId, client);
+    const { expired, attempt: checked } = await enforceExpiry(client, attempt);
 
-    if (attemptResult.rows.length === 0) {
-      throw new ApiError(
-        HTTP_STATUS.NOT_FOUND,
-        'Attempt not found'
-      );
+    if (expired) {
+      await client.query('COMMIT');
+      throw new ApiError(HTTP_STATUS.BAD_REQUEST, 'This test attempt has expired');
     }
 
-    const attempt = attemptResult.rows[0];
-
-    if (attempt.status !== 'in_progress') {
-      throw new ApiError(
-        HTTP_STATUS.BAD_REQUEST,
-        'Cannot submit answers to a completed attempt'
-      );
+    if (checked.status !== 'in_progress') {
+      throw new ApiError(HTTP_STATUS.BAD_REQUEST, 'Cannot submit answers to a completed attempt');
     }
 
-    // Get question details
     const questionResult = await client.query(
-      `SELECT id, test_id, type, marks FROM questions WHERE id = $1`,
+      `SELECT id, test_id, type, marks, order_index FROM questions WHERE id = $1`,
       [questionId]
     );
-
     if (questionResult.rows.length === 0) {
-      throw new ApiError(
-        HTTP_STATUS.NOT_FOUND,
-        'Question not found'
-      );
+      throw new ApiError(HTTP_STATUS.NOT_FOUND, 'Question not found');
     }
-
     const question = questionResult.rows[0];
 
-    // Validate question belongs to this test
-    if (question.test_id !== attempt.test_id) {
-      throw new ApiError(
-        HTTP_STATUS.BAD_REQUEST,
-        'Question does not belong to this test'
-      );
+    if (question.test_id !== checked.test_id) {
+      throw new ApiError(HTTP_STATUS.BAD_REQUEST, 'Question does not belong to this test');
     }
 
     let isCorrect = null;
@@ -198,36 +344,26 @@ const submitResponse = async (attemptId, questionId, selectedOption = null, code
     let selectedOptionId = null;
     let gradingStatus = 'auto_graded';
 
-    // Auto-grade MCQ
     if (question.type === 'mcq' && selectedOption !== null && selectedOption !== undefined) {
-      // Fetch all options for this question, ordered by index
       const optionsResult = await client.query(
-        `SELECT id, is_correct, order_index FROM mcq_options 
-         WHERE question_id = $1 
-         ORDER BY order_index ASC`,
+        `SELECT id, is_correct, order_index FROM mcq_options WHERE question_id = $1 ORDER BY order_index ASC`,
         [questionId]
       );
-
       const options = optionsResult.rows;
 
-      const isNumericString =
-        typeof selectedOption === 'string' && /^\d+$/.test(selectedOption);
-      const selectedOptionIndex =
-        typeof selectedOption === 'number'
-          ? selectedOption
-          : isNumericString
-            ? Number.parseInt(selectedOption, 10)
-            : null;
+      const isNumericString = typeof selectedOption === 'string' && /^\d+$/.test(selectedOption);
+      const selectedOptionIndex = typeof selectedOption === 'number'
+        ? selectedOption
+        : isNumericString
+          ? Number.parseInt(selectedOption, 10)
+          : null;
 
       const selectedOptionRecord = Number.isInteger(selectedOptionIndex)
         ? options[selectedOptionIndex]
-        : options.find((option) => option.id === selectedOption);
+        : options.find((o) => o.id === selectedOption);
 
       if (!selectedOptionRecord) {
-        throw new ApiError(
-          HTTP_STATUS.BAD_REQUEST,
-          'Invalid selected option. Provide a valid option id or index.'
-        );
+        throw new ApiError(HTTP_STATUS.BAD_REQUEST, 'Invalid selected option');
       }
 
       selectedOptionId = selectedOptionRecord.id;
@@ -235,52 +371,48 @@ const submitResponse = async (attemptId, questionId, selectedOption = null, code
       marksObtained = isCorrect ? question.marks : 0;
     }
 
-    // For coding and essay questions, marks will be assigned during review/evaluation
     if (question.type === QUESTION_TYPES.CODING || question.type === QUESTION_TYPES.ESSAY) {
-      marksObtained = 0;
       gradingStatus = 'pending_review';
     }
 
-    // Check if response already exists for this question
+    // Upsert response
     const existingResponse = await client.query(
       `SELECT id FROM question_responses WHERE attempt_id = $1 AND question_id = $2`,
       [attemptId, questionId]
     );
 
     let response;
-
     if (existingResponse.rows.length > 0) {
-      // Update existing response
       const updateResult = await client.query(
         `UPDATE question_responses
-         SET selected_option_id = $1, code_answer = $2, is_correct = $3, marks_obtained = $4, grading_status = $5, updated_at = CURRENT_TIMESTAMP
+         SET selected_option_id = $1, code_answer = $2, is_correct = $3, marks_obtained = $4,
+             grading_status = $5, updated_at = CURRENT_TIMESTAMP
          WHERE attempt_id = $6 AND question_id = $7
-         RETURNING id, attempt_id, question_id, selected_option_id, code_answer, is_correct, marks_obtained, grading_status, reviewed_by, reviewed_at, review_notes, created_at, updated_at`,
+         RETURNING id, attempt_id, question_id, selected_option_id, code_answer, is_correct, marks_obtained, grading_status`,
         [selectedOptionId || null, codeAnswer || null, isCorrect, marksObtained, gradingStatus, attemptId, questionId]
       );
       response = updateResult.rows[0];
     } else {
-      // Insert new response
       const insertResult = await client.query(
         `INSERT INTO question_responses (attempt_id, question_id, selected_option_id, code_answer, is_correct, marks_obtained, grading_status)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING id, attempt_id, question_id, selected_option_id, code_answer, is_correct, marks_obtained, grading_status, reviewed_by, reviewed_at, review_notes, created_at, updated_at`,
+         RETURNING id, attempt_id, question_id, selected_option_id, code_answer, is_correct, marks_obtained, grading_status`,
         [attemptId, questionId, selectedOptionId || null, codeAnswer || null, isCorrect, marksObtained, gradingStatus]
       );
       response = insertResult.rows[0];
     }
 
+    // Update current_question_index to the answered question's index
+    await client.query(
+      `UPDATE test_attempts SET current_question_index = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+      [question.order_index, attemptId]
+    );
+
     await client.query('COMMIT');
-
-    logger.info('Response submitted', {
-      attemptId,
-      questionId,
-      isCorrect,
-    });
-
+    logger.info('Response submitted', { attemptId, questionId, isCorrect });
     return response;
   } catch (error) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     logger.error('Error submitting response', { error: error.message });
     throw error;
   } finally {
@@ -288,18 +420,40 @@ const submitResponse = async (attemptId, questionId, selectedOption = null, code
   }
 };
 
-/**
- * Manually review a coding or essay response
- * @param {string} attemptId - Attempt ID
- * @param {string} responseId - Response ID
- * @param {number} marksObtained - Final marks awarded
- * @param {string} reviewerId - Admin user ID reviewing the response
- * @param {string} reviewNotes - Optional review notes
- * @returns {Promise<Object>} Reviewed response and refreshed result if available
- */
+// ──────────────────────────────────────────────
+// SUBMIT ATTEMPT (idempotent)
+// ──────────────────────────────────────────────
+
+const submitAttempt = async (attemptId) => {
+  const evaluationResult = await evaluationService.evaluateAttempt(attemptId);
+  const attemptResult = await db.query(
+    `SELECT id, test_id, user_id, start_time, end_time, status, score, current_question_index, created_at, updated_at
+     FROM test_attempts WHERE id = $1`,
+    [attemptId]
+  );
+  const attempt = attemptResult.rows[0];
+
+  logger.info(evaluationResult.isRetry ? 'Test resubmitted (idempotent)' : 'Test submitted', {
+    attemptId, obtained: evaluationResult.evaluation.obtainedMarks,
+    total: evaluationResult.evaluation.totalMarks,
+    percentage: evaluationResult.evaluation.percentage,
+    passed: evaluationResult.evaluation.passed,
+  });
+
+  return {
+    attempt,
+    result: evaluationResult.evaluation,
+    resultRecord: evaluationResult.result,
+    isRetry: evaluationResult.isRetry,
+  };
+};
+
+// ──────────────────────────────────────────────
+// REVIEW RESPONSE (unchanged logic, included for completeness)
+// ──────────────────────────────────────────────
+
 const reviewResponse = async (attemptId, responseId, marksObtained, reviewerId, reviewNotes = null) => {
   const client = await db.getClient();
-
   try {
     await client.query('BEGIN');
 
@@ -307,7 +461,6 @@ const reviewResponse = async (attemptId, responseId, marksObtained, reviewerId, 
       `SELECT id, test_id, user_id, status FROM test_attempts WHERE id = $1`,
       [attemptId]
     );
-
     if (attemptResult.rows.length === 0) {
       throw new ApiError(HTTP_STATUS.NOT_FOUND, 'Attempt not found');
     }
@@ -319,95 +472,50 @@ const reviewResponse = async (attemptId, responseId, marksObtained, reviewerId, 
        WHERE qr.id = $1 AND qr.attempt_id = $2`,
       [responseId, attemptId]
     );
-
     if (responseResult.rows.length === 0) {
       throw new ApiError(HTTP_STATUS.NOT_FOUND, 'Response not found');
     }
-
     const response = responseResult.rows[0];
 
     if (response.type === QUESTION_TYPES.MCQ) {
-      throw new ApiError(
-        HTTP_STATUS.BAD_REQUEST,
-        'MCQ responses are auto-graded and cannot be manually reviewed'
-      );
+      throw new ApiError(HTTP_STATUS.BAD_REQUEST, 'MCQ responses are auto-graded and cannot be manually reviewed');
     }
 
     const finalMarks = Number(marksObtained);
-
     if (!Number.isFinite(finalMarks) || finalMarks < 0 || finalMarks > response.marks) {
-      throw new ApiError(
-        HTTP_STATUS.BAD_REQUEST,
-        `marksObtained must be a number between 0 and ${response.marks}`
-      );
+      throw new ApiError(HTTP_STATUS.BAD_REQUEST, `marksObtained must be between 0 and ${response.marks}`);
     }
 
     const updateResult = await client.query(
       `UPDATE question_responses
-       SET marks_obtained = $1,
-           grading_status = 'reviewed',
-           reviewed_by = $2,
-           reviewed_at = CURRENT_TIMESTAMP,
-           review_notes = $3,
-           updated_at = CURRENT_TIMESTAMP
+       SET marks_obtained = $1, grading_status = 'reviewed', reviewed_by = $2,
+           reviewed_at = CURRENT_TIMESTAMP, review_notes = $3, updated_at = CURRENT_TIMESTAMP
        WHERE id = $4 AND attempt_id = $5
-       RETURNING id, attempt_id, question_id, selected_option_id, code_answer, is_correct, marks_obtained, grading_status, reviewed_by, reviewed_at, review_notes, created_at, updated_at`,
+       RETURNING id, attempt_id, question_id, selected_option_id, code_answer, is_correct, marks_obtained, grading_status, reviewed_by, reviewed_at, review_notes`,
       [finalMarks, reviewerId, reviewNotes, responseId, attemptId]
     );
 
     let refreshedResult = null;
-
-    const existingResult = await client.query(
-      `SELECT id FROM results WHERE attempt_id = $1`,
-      [attemptId]
-    );
-
+    const existingResult = await client.query(`SELECT id FROM results WHERE attempt_id = $1`, [attemptId]);
     if (existingResult.rows.length > 0) {
       const refreshedMetrics = await evaluationService.calculateAttemptMetrics(client, attemptId);
-
       const resultUpdate = await client.query(
-        `UPDATE results
-         SET total_marks = $1,
-             obtained_marks = $2,
-             percentage = $3,
-             passed = $4,
-             updated_at = CURRENT_TIMESTAMP
+        `UPDATE results SET total_marks = $1, obtained_marks = $2, percentage = $3, passed = $4, updated_at = CURRENT_TIMESTAMP
          WHERE attempt_id = $5
-         RETURNING id, attempt_id, test_id, user_id, total_marks, obtained_marks, percentage, passed, created_at, updated_at`,
-        [
-          refreshedMetrics.totalMarks,
-          refreshedMetrics.obtainedMarks,
-          refreshedMetrics.percentage,
-          refreshedMetrics.passed,
-          attemptId,
-        ]
+         RETURNING id, attempt_id, test_id, user_id, total_marks, obtained_marks, percentage, passed`,
+        [refreshedMetrics.totalMarks, refreshedMetrics.obtainedMarks, refreshedMetrics.percentage, refreshedMetrics.passed, attemptId]
       );
-
       await client.query(
-        `UPDATE test_attempts
-         SET score = $1, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $2`,
+        `UPDATE test_attempts SET score = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
         [refreshedMetrics.obtainedMarks, attemptId]
       );
-
-      refreshedResult = {
-        result: resultUpdate.rows[0],
-        evaluation: refreshedMetrics,
-      };
+      refreshedResult = { result: resultUpdate.rows[0], evaluation: refreshedMetrics };
     }
 
     await client.query('COMMIT');
-
-    return {
-      response: updateResult.rows[0],
-      refreshedResult,
-    };
+    return { response: updateResult.rows[0], refreshedResult };
   } catch (error) {
-    try {
-      await client.query('ROLLBACK');
-    } catch (rollbackError) {
-      logger.warn('Error rolling back transaction', { error: rollbackError.message });
-    }
+    await client.query('ROLLBACK').catch(() => {});
     logger.error('Error reviewing response', { error: error.message });
     throw error;
   } finally {
@@ -415,59 +523,14 @@ const reviewResponse = async (attemptId, responseId, marksObtained, reviewerId, 
   }
 };
 
-/**
- * Submit entire test - delegate to evaluation service for scoring
- * Idempotent: Multiple submissions return same result instead of erroring
- * @param {string} attemptId - Attempt ID
- * @returns {Promise<Object>} Completed attempt with result details
- */
-const submitAttempt = async (attemptId) => {
-  try {
-    // Use evaluation service to evaluate and create result record
-    const evaluationResult = await evaluationService.evaluateAttempt(attemptId);
+// ──────────────────────────────────────────────
+// QUERIES (unchanged from original)
+// ──────────────────────────────────────────────
 
-    // Get the updated attempt details
-    const attemptResult = await db.query(
-      `SELECT id, test_id, user_id, start_time, end_time, status, score, created_at, updated_at
-       FROM test_attempts WHERE id = $1`,
-      [attemptId]
-    );
-
-    const attempt = attemptResult.rows[0];
-
-    const logMessage = evaluationResult.isRetry 
-      ? 'Test attempt resubmitted (idempotent - returning cached result)'
-      : 'Test attempt submitted and evaluated';
-
-    logger.info(logMessage, {
-      attemptId,
-      obtained: evaluationResult.evaluation.obtainedMarks,
-      total: evaluationResult.evaluation.totalMarks,
-      percentage: evaluationResult.evaluation.percentage,
-      passed: evaluationResult.evaluation.passed,
-      isRetry: evaluationResult.isRetry,
-    });
-
-    return {
-      attempt,
-      result: evaluationResult.evaluation,
-      resultRecord: evaluationResult.result,
-      isRetry: evaluationResult.isRetry,
-    };
-  } catch (error) {
-    logger.error('Error submitting attempt', { error: error.message });
-    throw error;
-  }
-};
-
-/**
- * Get all attempts for a user
- * @param {string} userId - User ID
- * @returns {Promise<Array>} User's attempts
- */
 const getUserAttempts = async (userId) => {
   const result = await db.query(
-    `SELECT a.id, a.test_id, a.user_id, a.start_time, a.end_time, a.status, a.score, a.created_at, a.updated_at,
+    `SELECT a.id, a.test_id, a.user_id, a.start_time, a.end_time, a.status, a.score,
+            a.current_question_index, a.created_at, a.updated_at,
             t.title as test_title, t.duration_minutes
      FROM test_attempts a
      JOIN tests t ON a.test_id = t.id
@@ -475,18 +538,13 @@ const getUserAttempts = async (userId) => {
      ORDER BY a.start_time DESC`,
     [userId]
   );
-
   return result.rows;
 };
 
-/**
- * Get all attempts for a test (admin only)
- * @param {string} testId - Test ID
- * @returns {Promise<Array>} Test's attempts
- */
 const getTestAttempts = async (testId) => {
   const result = await db.query(
-    `SELECT a.id, a.test_id, a.user_id, a.start_time, a.end_time, a.status, a.score, a.created_at, a.updated_at,
+    `SELECT a.id, a.test_id, a.user_id, a.start_time, a.end_time, a.status, a.score,
+            a.current_question_index, a.created_at, a.updated_at,
             u.name as user_name, u.email as user_email
      FROM test_attempts a
      JOIN users u ON a.user_id = u.id
@@ -494,32 +552,16 @@ const getTestAttempts = async (testId) => {
      ORDER BY a.start_time DESC`,
     [testId]
   );
-
   return result.rows;
 };
 
-/**
- * Get all pending coding/essay evaluations for admin review
- * @returns {Promise<Object>} Pending evaluations grouped by attempt
- */
 const getPendingEvaluations = async () => {
   const result = await db.query(
-    `SELECT qr.id AS response_id,
-            qr.attempt_id,
-            qr.question_id,
-            qr.code_answer,
-            qr.grading_status,
-            qr.created_at AS response_created_at,
-            q.question_text,
-            q.marks AS question_marks,
-            q.type AS question_type,
-            a.test_id,
-            a.user_id,
-            a.end_time,
-            a.status AS attempt_status,
-            t.title AS test_title,
-            u.name AS candidate_name,
-            u.email AS candidate_email
+    `SELECT qr.id AS response_id, qr.attempt_id, qr.question_id, qr.code_answer,
+            qr.grading_status, qr.created_at AS response_created_at,
+            q.question_text, q.marks AS question_marks, q.type AS question_type,
+            a.test_id, a.user_id, a.end_time, a.status AS attempt_status,
+            t.title AS test_title, u.name AS candidate_name, u.email AS candidate_email
      FROM question_responses qr
      JOIN questions q ON q.id = qr.question_id
      JOIN test_attempts a ON a.id = qr.attempt_id
@@ -532,7 +574,6 @@ const getPendingEvaluations = async () => {
   );
 
   const grouped = new Map();
-
   result.rows.forEach((row) => {
     if (!grouped.has(row.attempt_id)) {
       grouped.set(row.attempt_id, {
@@ -547,7 +588,6 @@ const getPendingEvaluations = async () => {
         pendingResponses: [],
       });
     }
-
     const attempt = grouped.get(row.attempt_id);
     attempt.pendingCount += 1;
     attempt.pendingResponses.push({
@@ -562,24 +602,21 @@ const getPendingEvaluations = async () => {
     });
   });
 
-  const pendingEvaluations = Array.from(grouped.values());
-
   return {
-    pendingEvaluations,
-    summary: {
-      attempts: pendingEvaluations.length,
-      responses: result.rows.length,
-    },
+    pendingEvaluations: Array.from(grouped.values()),
+    summary: { attempts: grouped.size, responses: result.rows.length },
   };
 };
 
 module.exports = {
   startAttempt,
   getAttempt,
+  getActiveAttempt,
   submitResponse,
   reviewResponse,
   submitAttempt,
   getUserAttempts,
   getTestAttempts,
   getPendingEvaluations,
+  enforceExpiry,
 };
