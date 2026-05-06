@@ -13,13 +13,13 @@ class AppRouter {
     switch (settings.name) {
       case '/login':
         return MaterialPageRoute(builder: (_) => const LoginScreen());
-      
+
       case '/admin/dashboard':
         return MaterialPageRoute(builder: (_) => const AdminDashboardScreen());
-      
+
       case '/admin/create-test':
         return MaterialPageRoute(builder: (_) => const CreateTestScreen());
-      
+
       case '/admin/add-questions':
         final testId = settings.arguments as String?;
         if (testId == null) {
@@ -28,19 +28,29 @@ class AppRouter {
         return MaterialPageRoute(
           builder: (_) => AddQuestionsScreen(testId: testId),
         );
-      
+
       case '/candidate/test-list':
         return MaterialPageRoute(builder: (_) => const TestListScreen());
-      
+
       case '/candidate/attempt':
-        final test = settings.arguments as Test?;
-        if (test == null) {
+        final args = settings.arguments as Map<String, dynamic>?;
+        if (args == null) {
           return _errorRoute('Test data required');
         }
+        final test = args['test'] as Test?;
+        final accessCode = args['accessCode'] as String?;
+        final resumeAttemptId = args['resumeAttemptId'] as String?;
+        if (test == null || accessCode == null) {
+          return _errorRoute('Test and access code required');
+        }
         return MaterialPageRoute(
-          builder: (_) => AttemptScreen(test: test),
+          builder: (_) => AttemptScreen(
+            test: test,
+            accessCode: accessCode,
+            resumeAttemptId: resumeAttemptId,
+          ),
         );
-      
+
       case '/candidate/result':
         final attemptId = settings.arguments as String?;
         if (attemptId == null) {
@@ -49,21 +59,17 @@ class AppRouter {
         return MaterialPageRoute(
           builder: (_) => ResultScreen(attemptId: attemptId),
         );
-      
+
       default:
         return _errorRoute('Route not found: ${settings.name}');
     }
   }
-  
+
   static Route<dynamic> _errorRoute(String message) {
     return MaterialPageRoute(
       builder: (_) => Scaffold(
-        appBar: AppBar(
-          title: const Text('Error'),
-        ),
-        body: Center(
-          child: Text(message),
-        ),
+        appBar: AppBar(title: const Text('Error')),
+        body: Center(child: Text(message)),
       ),
     );
   }
