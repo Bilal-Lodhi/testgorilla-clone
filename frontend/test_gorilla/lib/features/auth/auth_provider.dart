@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' show ClientException;
 import 'package:test_gorilla/features/auth/auth_service.dart';
 import 'package:test_gorilla/core/api/api_client.dart';
 
@@ -37,6 +40,10 @@ class AuthProvider extends ChangeNotifier {
 
     if (error is TimeoutException) {
       return 'Request timed out. Please check your connection and try again.';
+    }
+
+    if (error is ClientException) {
+      return 'Cannot reach server. Please check API URL and backend status.';
     }
 
     return 'Unable to complete request. Please try again.';
