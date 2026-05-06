@@ -19,6 +19,7 @@ class _CreateTestScreenState extends State<CreateTestScreen> {
   final _descriptionController = TextEditingController();
   final _durationController = TextEditingController(text: '60');
   final _passPercentageController = TextEditingController();
+  final _accessCodeController = TextEditingController();
   String _selectedStatus = 'draft';
 
   bool _isLoading = false;
@@ -30,6 +31,7 @@ class _CreateTestScreenState extends State<CreateTestScreen> {
     _descriptionController.dispose();
     _durationController.dispose();
     _passPercentageController.dispose();
+    _accessCodeController.dispose();
     super.dispose();
   }
 
@@ -55,6 +57,7 @@ class _CreateTestScreenState extends State<CreateTestScreen> {
           'description': _descriptionController.text.trim(),
           'duration_minutes': int.parse(_durationController.text),
           'pass_percentage': int.parse(_passPercentageController.text),
+          'access_code': _accessCodeController.text.trim(),
           'status': _selectedStatus,
         },
       );
@@ -207,6 +210,27 @@ class _CreateTestScreenState extends State<CreateTestScreen> {
                             Expanded(child: passField),
                           ],
                         );
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _accessCodeController,
+                      decoration: const InputDecoration(
+                        labelText: 'Test Access Code / Passcode',
+                        prefixIcon: Icon(Icons.lock_outline),
+                        hintText: 'e.g. TEST123',
+                        helperText:
+                            'Candidates must enter this code to start the test.',
+                      ),
+                      validator: (value) {
+                        if (value == null || value.trim().isEmpty) {
+                          return 'Access code is required';
+                        }
+                        if (value.trim().length < 3) {
+                          return 'Access code must be at least 3 characters';
+                        }
+                        return null;
                       },
                     ),
                     const SizedBox(height: 16),
