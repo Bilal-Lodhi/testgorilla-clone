@@ -25,8 +25,10 @@ class ApiConstants {
       '/tests/$testId/questions/$questionId';
 
   // Attempt endpoints
+  static String verifyAccess(String testId) => '/tests/$testId/verify-access';
   static String startAttempt(String testId) => '/tests/$testId/attempts';
   static String getAttempt(String attemptId) => '/attempts/$attemptId';
+  static const String activeAttempt = '/attempts/active';
   static String submitResponse(String attemptId) =>
       '/attempts/$attemptId/responses';
   static String reviewResponse(String attemptId, String responseId) =>
