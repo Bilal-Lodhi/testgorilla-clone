@@ -95,16 +95,31 @@ const getAttempt = async (req, res, next) => {
   try {
     const { attemptId } = req.params;
 
-    const attempt = await attemptService.getAttempt(attemptId);
+    const data = await attemptService.getAttemptWithResponses(attemptId);
 
-    if (req.user.role === 'candidate' && attempt.user_id !== req.user.id) {
+    if (req.user.role === 'candidate' && data.attempt.user_id !== req.user.id) {
       throw new ApiError(HTTP_STATUS.FORBIDDEN, 'Unauthorized: You can only view your own attempts');
+    }
+
+    // If expired, auto-submit happened — return completed state
+    if (data.expired) {
+      return res.status(HTTP_STATUS.OK).json({
+        success: true,
+        message: 'Attempt has expired',
+        data: { attempt: data.attempt, expired: true },
+      });
     }
 
     res.status(HTTP_STATUS.OK).json({
       success: true,
       message: 'Attempt retrieved successfully',
-      data: { attempt },
+      data: {
+        attempt: data.attempt,
+        responses: data.responses,
+        start_time: data.attempt.start_time,
+        duration: data.attempt.duration_minutes,
+        current_question_index: data.attempt.current_question_index,
+      },
     });
   } catch (error) {
     next(error);
