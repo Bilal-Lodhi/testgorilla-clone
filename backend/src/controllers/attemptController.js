@@ -4,7 +4,7 @@ const { HTTP_STATUS } = require('../utils/constants');
 const { ApiError } = require('../middleware/errorHandler');
 
 /**
- * Start a test attempt
+ * Start a test attempt (idempotent – resumes if active)
  * POST /api/v1/tests/:testId/attempts
  * Candidate only
  */
@@ -14,31 +14,72 @@ const startAttempt = async (req, res, next) => {
     const userId = req.user.id;
 
     if (req.user.role !== 'candidate') {
-      throw new ApiError(
-        HTTP_STATUS.FORBIDDEN,
-        'Only candidates can take tests'
-      );
+      throw new ApiError(HTTP_STATUS.FORBIDDEN, 'Only candidates can take tests');
     }
 
-    // Verify test exists and is published
     const test = await testService.getTestById(testId);
-
     if (test.status !== 'published') {
-      throw new ApiError(
-        HTTP_STATUS.BAD_REQUEST,
-        'Test is not published. Cannot start attempt.'
-      );
+      throw new ApiError(HTTP_STATUS.BAD_REQUEST, 'Test is not published. Cannot start attempt.');
     }
 
-    // Enforce access code verification server-side
     await testService.verifyAccessCode(testId, req.body.access_code);
 
     const result = await attemptService.startAttempt(testId, userId);
 
+    const message = result.resumed
+      ? 'Resumed existing test attempt'
+      : result.expired
+        ? 'Previous attempt has expired'
+        : 'Test attempt started successfully';
+
     res.status(HTTP_STATUS.CREATED).json({
       success: true,
-      message: 'Test attempt started successfully',
+      message,
       data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get active attempt for current user (resume endpoint)
+ * GET /api/v1/attempts/active
+ * Candidate only
+ *
+ * Returns null data.attempt if no active attempt exists.
+ * If active attempt is expired, auto-submits and returns expired=true.
+ */
+const getActiveAttempt = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+
+    const result = await attemptService.getActiveAttempt(userId);
+
+    if (!result) {
+      return res.status(HTTP_STATUS.OK).json({
+        success: true,
+        message: 'No active attempt found',
+        data: { attempt: null },
+      });
+    }
+
+    if (result.expired) {
+      return res.status(HTTP_STATUS.OK).json({
+        success: true,
+        message: 'Previous attempt has expired',
+        data: { attempt: result.attempt, expired: true },
+      });
+    }
+
+    res.status(HTTP_STATUS.OK).json({
+      success: true,
+      message: 'Active attempt found',
+      data: {
+        attempt: result.attempt,
+        questions: result.questions,
+        responses: result.responses,
+      },
     });
   } catch (error) {
     next(error);
@@ -56,12 +97,8 @@ const getAttempt = async (req, res, next) => {
 
     const attempt = await attemptService.getAttempt(attemptId);
 
-    // Verify user owns this attempt (candidate) or is admin
     if (req.user.role === 'candidate' && attempt.user_id !== req.user.id) {
-      throw new ApiError(
-        HTTP_STATUS.FORBIDDEN,
-        'Unauthorized: You can only view your own attempts'
-      );
+      throw new ApiError(HTTP_STATUS.FORBIDDEN, 'Unauthorized: You can only view your own attempts');
     }
 
     res.status(HTTP_STATUS.OK).json({
@@ -92,21 +129,13 @@ const submitResponse = async (req, res, next) => {
       answer,
     } = req.body;
 
-    // Validate input
     if (!questionId) {
-      throw new ApiError(
-        HTTP_STATUS.BAD_REQUEST,
-        'questionId is required'
-      );
+      throw new ApiError(HTTP_STATUS.BAD_REQUEST, 'questionId is required');
     }
 
-    // Verify user owns this attempt
     const attempt = await attemptService.getAttempt(attemptId);
     if (attempt.user_id !== req.user.id) {
-      throw new ApiError(
-        HTTP_STATUS.FORBIDDEN,
-        'Unauthorized: You can only submit answers to your own attempts'
-      );
+      throw new ApiError(HTTP_STATUS.FORBIDDEN, 'Unauthorized: You can only submit answers to your own attempts');
     }
 
     const response = await attemptService.submitResponse(
@@ -134,28 +163,18 @@ const submitResponse = async (req, res, next) => {
 const reviewResponse = async (req, res, next) => {
   try {
     if (req.user.role !== 'admin') {
-      throw new ApiError(
-        HTTP_STATUS.FORBIDDEN,
-        'Only admins can review responses'
-      );
+      throw new ApiError(HTTP_STATUS.FORBIDDEN, 'Only admins can review responses');
     }
 
     const { attemptId, responseId } = req.params;
     const { marksObtained, reviewNotes } = req.body;
 
     if (marksObtained === undefined || marksObtained === null) {
-      throw new ApiError(
-        HTTP_STATUS.BAD_REQUEST,
-        'marksObtained is required'
-      );
+      throw new ApiError(HTTP_STATUS.BAD_REQUEST, 'marksObtained is required');
     }
 
     const result = await attemptService.reviewResponse(
-      attemptId,
-      responseId,
-      marksObtained,
-      req.user.id,
-      reviewNotes || null
+      attemptId, responseId, marksObtained, req.user.id, reviewNotes || null
     );
 
     res.status(HTTP_STATUS.OK).json({
@@ -175,13 +194,11 @@ const reviewResponse = async (req, res, next) => {
  * POST /api/v1/attempts/:attemptId/submit
  * Candidate (own attempt)
  * Idempotent: Multiple submissions return same result
- * Middleware (verifyAttemptOwnership) already verified authentication and ownership
  */
 const submitAttempt = async (req, res, next) => {
   try {
     const { attemptId } = req.params;
 
-    // Attempt ownership already verified by verifyAttemptOwnership middleware
     const result = await attemptService.submitAttempt(attemptId);
 
     const message = result.isRetry
@@ -207,7 +224,6 @@ const getCandidateAttempts = async (req, res, next) => {
   try {
     let userId = req.user.id;
 
-    // Admin can view other users' attempts if userId provided in query
     if (req.user.role === 'admin' && req.query.userId) {
       userId = req.query.userId;
     }
@@ -233,15 +249,10 @@ const getTestAttempts = async (req, res, next) => {
   try {
     const testId = req.params.testId || req.params.id;
 
-    // Verify test exists
     const test = await testService.getTestById(testId);
-    
-    // Allow admins to view all test attempts, or enforce ownership for non-admins
+
     if (req.user.role !== 'admin' && test.created_by !== req.user.id) {
-      throw new ApiError(
-        HTTP_STATUS.FORBIDDEN,
-        'Unauthorized: You can only view attempts for your own tests'
-      );
+      throw new ApiError(HTTP_STATUS.FORBIDDEN, 'Unauthorized: You can only view attempts for your own tests');
     }
 
     const attempts = await attemptService.getTestAttempts(testId);
@@ -264,10 +275,7 @@ const getTestAttempts = async (req, res, next) => {
 const getPendingEvaluations = async (req, res, next) => {
   try {
     if (req.user.role !== 'admin') {
-      throw new ApiError(
-        HTTP_STATUS.FORBIDDEN,
-        'Only admins can access pending evaluations'
-      );
+      throw new ApiError(HTTP_STATUS.FORBIDDEN, 'Only admins can access pending evaluations');
     }
 
     const data = await attemptService.getPendingEvaluations();
@@ -284,6 +292,7 @@ const getPendingEvaluations = async (req, res, next) => {
 
 module.exports = {
   startAttempt,
+  getActiveAttempt,
   getAttempt,
   submitResponse,
   reviewResponse,
