@@ -192,6 +192,23 @@ class ApiClient {
     _log('Response Body: ${response.body}');
 
     try {
+      // Handle empty body responses gracefully
+      if (response.body.trim().isEmpty) {
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          return null;
+        }
+
+        if (response.statusCode == 401 && hadAuthToken) {
+          await _handleUnauthorized();
+        }
+
+        throw ApiException(
+          message: 'Server returned empty response',
+          statusCode: response.statusCode,
+          response: response.body,
+        );
+      }
+
       final decodedResponse = jsonDecode(response.body);
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
@@ -220,9 +237,11 @@ class ApiClient {
         await _handleUnauthorized();
       }
 
+      // If we couldn't parse JSON, surface the raw body for easier debugging
       throw ApiException(
-        message: 'Failed to parse response',
+        message: 'Failed to parse response: ${e.toString()}',
         statusCode: response.statusCode,
+        response: response.body,
       );
     }
   }
