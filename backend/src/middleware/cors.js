@@ -26,7 +26,7 @@ const configureCors = () => {
 
   logger.info('CORS configuration', {
     environment: NODE_ENV,
-    customOrigins: envOrigins,
+    customOrigins: rawEnvOrigins,
   });
 
   return cors({
