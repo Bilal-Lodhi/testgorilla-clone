@@ -98,6 +98,22 @@ class _SignupScreenState extends State<SignupScreen> {
           icon: Icon(Icons.arrow_back, color: onSurface),
           onPressed: () => Navigator.of(context).pop(),
         ),
+        actions: [
+          Consumer<ThemeProvider>(
+            builder: (context, themeProvider, _) {
+              final isDark = themeProvider.isDarkMode;
+              return IconButton(
+                onPressed: themeProvider.toggleTheme,
+                icon: Icon(
+                  isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+                ),
+                tooltip: isDark
+                    ? 'Switch to Light Mode'
+                    : 'Switch to Dark Mode',
+              );
+            },
+          ),
+        ],
       ),
       body: Center(
         child: SingleChildScrollView(
@@ -109,26 +125,6 @@ class _SignupScreenState extends State<SignupScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Theme toggle
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: Consumer<ThemeProvider>(
-                      builder: (context, themeProvider, _) {
-                        final isDark = themeProvider.isDarkMode;
-                        return IconButton(
-                          onPressed: themeProvider.toggleTheme,
-                          icon: Icon(
-                            isDark
-                                ? Icons.light_mode_outlined
-                                : Icons.dark_mode_outlined,
-                          ),
-                          tooltip: isDark
-                              ? 'Switch to Light Mode'
-                              : 'Switch to Dark Mode',
-                        );
-                      },
-                    ),
-                  ),
                   // App Logo/Title
                   Text(
                     'TestGorilla',
