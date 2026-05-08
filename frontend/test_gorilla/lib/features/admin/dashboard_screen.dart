@@ -892,7 +892,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       children: [
         Container(
           width: _sidebarExpanded ? 250 : 80,
-          decoration: const BoxDecoration(color: Color(0xFF0F172A)),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+          ),
           child: SafeArea(
             child: Column(
               children: [
@@ -906,7 +908,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           'Test Gorilla',
                           style: Theme.of(context).textTheme.titleLarge
                               ?.copyWith(
-                                color: Colors.white,
+                                color: Theme.of(context).colorScheme.onSurface,
                                 fontWeight: FontWeight.w700,
                               ),
                         ),
@@ -915,7 +917,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           _sidebarExpanded
                               ? Icons.chevron_left
                               : Icons.chevron_right,
-                          color: Colors.white70,
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onSurface.withOpacity(0.7),
                         ),
                         onPressed: () {
                           setState(() {
@@ -981,14 +985,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     child: Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.08),
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.onSurface.withOpacity(0.08),
                         borderRadius: BorderRadius.circular(AppTheme.radiusMd),
                       ),
                       child: Text(
                         'Use Create Test to draft new assessments and publish once questions are ready.',
-                        style: Theme.of(
-                          context,
-                        ).textTheme.bodySmall?.copyWith(color: Colors.white70),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onSurface.withOpacity(0.7),
+                        ),
                       ),
                     ),
                   ),
@@ -1022,7 +1030,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           ? Container(
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.08),
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurface.withOpacity(0.08),
                                 borderRadius: BorderRadius.circular(
                                   AppTheme.radiusMd,
                                 ),
@@ -1031,15 +1041,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                 children: [
                                   CircleAvatar(
                                     radius: 20,
-                                    backgroundColor: Colors.white.withOpacity(
-                                      0.2,
-                                    ),
+                                    backgroundColor: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurface.withOpacity(0.2),
                                     child: Text(
                                       userName.isNotEmpty
                                           ? userName[0].toUpperCase()
                                           : 'A',
-                                      style: const TextStyle(
-                                        color: Colors.white,
+                                      style: TextStyle(
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onSurface,
                                         fontWeight: FontWeight.bold,
                                         fontSize: 16,
                                       ),
@@ -1058,7 +1070,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                               .textTheme
                                               .bodyMedium
                                               ?.copyWith(
-                                                color: Colors.white,
+                                                color: Theme.of(
+                                                  context,
+                                                ).colorScheme.onSurface,
                                                 fontWeight: FontWeight.w600,
                                               ),
                                           maxLines: 1,
@@ -1069,7 +1083,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                           style: Theme.of(context)
                                               .textTheme
                                               .bodySmall
-                                              ?.copyWith(color: Colors.white70),
+                                              ?.copyWith(
+                                                color: Theme.of(context)
+                                                    .colorScheme
+                                                    .onSurface
+                                                    .withOpacity(0.7),
+                                              ),
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                         ),
@@ -1082,13 +1101,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           : Center(
                               child: CircleAvatar(
                                 radius: 20,
-                                backgroundColor: Colors.white.withOpacity(0.2),
+                                backgroundColor: Theme.of(
+                                  context,
+                                ).colorScheme.onSurface.withOpacity(0.2),
                                 child: Text(
                                   userName.isNotEmpty
                                       ? userName[0].toUpperCase()
                                       : 'A',
-                                  style: const TextStyle(
-                                    color: Colors.white,
+                                  style: TextStyle(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurface,
                                     fontWeight: FontWeight.bold,
                                     fontSize: 16,
                                   ),
@@ -1182,7 +1205,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   Widget _buildSidebarDrawer() {
     return Drawer(
-      backgroundColor: const Color(0xFF0F172A),
+      backgroundColor: Theme.of(context).colorScheme.surface,
       child: SafeArea(
         child: Column(
           children: [
@@ -1191,7 +1214,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               child: Text(
                 'Test Gorilla',
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  color: Colors.white,
+                  color: Theme.of(context).colorScheme.onSurface,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -1251,14 +1274,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 child: Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.08),
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.onSurface.withOpacity(0.08),
                     borderRadius: BorderRadius.circular(AppTheme.radiusMd),
                   ),
                   child: Text(
                     'Use Create Test to draft new assessments and publish once questions are ready.',
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodySmall?.copyWith(color: Colors.white70),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.onSurface.withOpacity(0.7),
+                    ),
                   ),
                 ),
               ),
@@ -1288,7 +1315,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   child: Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.08),
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.onSurface.withOpacity(0.08),
                       borderRadius: BorderRadius.circular(AppTheme.radiusMd),
                     ),
                     child: Row(
@@ -1315,7 +1344,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                 userName,
                                 style: Theme.of(context).textTheme.bodyMedium
                                     ?.copyWith(
-                                      color: Colors.white,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurface,
                                       fontWeight: FontWeight.w600,
                                     ),
                                 overflow: TextOverflow.ellipsis,
@@ -1323,7 +1354,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               Text(
                                 userEmail,
                                 style: Theme.of(context).textTheme.bodySmall
-                                    ?.copyWith(color: Colors.white70),
+                                    ?.copyWith(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurface.withOpacity(0.7),
+                                    ),
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ],
@@ -1363,7 +1398,9 @@ class _SidebarItem extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: selected ? Colors.white.withOpacity(0.12) : Colors.transparent,
+        color: selected
+            ? Theme.of(context).colorScheme.onSurface.withOpacity(0.12)
+            : Colors.transparent,
         borderRadius: BorderRadius.circular(AppTheme.radiusMd),
       ),
       child: Material(
@@ -1376,14 +1413,19 @@ class _SidebarItem extends StatelessWidget {
             child: expanded
                 ? Row(
                     children: [
-                      Icon(icon, color: Colors.white70),
+                      Icon(
+                        icon,
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.onSurface.withOpacity(0.7),
+                      ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
                           label,
                           style: Theme.of(context).textTheme.bodyMedium
                               ?.copyWith(
-                                color: Colors.white,
+                                color: Theme.of(context).colorScheme.onSurface,
                                 fontWeight: selected
                                     ? FontWeight.w700
                                     : FontWeight.w500,
@@ -1411,7 +1453,15 @@ class _SidebarItem extends StatelessWidget {
                         ),
                     ],
                   )
-                : Center(child: Icon(icon, color: Colors.white70, size: 24)),
+                : Center(
+                    child: Icon(
+                      icon,
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.onSurface.withOpacity(0.7),
+                      size: 24,
+                    ),
+                  ),
           ),
         ),
       ),
