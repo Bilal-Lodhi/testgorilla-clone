@@ -112,7 +112,9 @@ class _CreateTestScreenState extends State<CreateTestScreen> {
                     Text(
                       'Configure basic details now. You can add questions right after creating the test.',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: const Color(0xFF64748B),
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.onSurface.withOpacity(0.5),
                       ),
                     ),
                     const SizedBox(height: 24),
