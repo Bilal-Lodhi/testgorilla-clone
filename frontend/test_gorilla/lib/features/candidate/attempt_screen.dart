@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -410,10 +409,18 @@ class _AttemptScreenState extends State<AttemptScreen>
   }
 
   Future<void> _handleTimeExpired() async {
-    // The backend auto-submits on expiry, so just navigate to results
     _removeBeforeUnloadWarning();
-    if (_attemptId != null && mounted) {
-      unawaited(AttemptStorage.clear());
+    _timer?.cancel();
+    if (_attemptId == null || !mounted) return;
+
+    try {
+      await _testService.submitAttempt(_attemptId!);
+    } catch (_) {
+      // Best-effort submit on expiry
+    }
+
+    await AttemptStorage.clear();
+    if (mounted) {
       Navigator.of(
         context,
       ).pushReplacementNamed('/candidate/result', arguments: _attemptId);
@@ -594,32 +601,21 @@ class _AttemptScreenState extends State<AttemptScreen>
 
   Future<void> _primeLowTimerWarningAudio() async {
     if (kIsWeb) {
-      const webAssetUrls = <String>[
-        'assets/lib/core/utils/tenseconds.mp3',
-        'assets/tenseconds.mp3',
-      ];
-      for (final url in webAssetUrls) {
-        try {
-          await _lowTimerWarningPlayer.setSourceUrl(url);
-          await _lowTimerWarningPlayer.stop();
-          return;
-        } catch (_) {}
-      }
-    }
-
-    const candidateAssetPaths = <String>[
-      'tenseconds.mp3',
-      'core/utils/tenseconds.mp3',
-      'lib/core/utils/tenseconds.mp3',
-      'assets/lib/core/utils/tenseconds.mp3',
-    ];
-    for (final path in candidateAssetPaths) {
       try {
-        await _lowTimerWarningPlayer.setSource(AssetSource(path));
+        await _lowTimerWarningPlayer.setSourceUrl(
+          'assets/lib/core/utils/tenseconds.mp3',
+        );
         await _lowTimerWarningPlayer.stop();
         return;
       } catch (_) {}
     }
+
+    try {
+      await _lowTimerWarningPlayer.setSource(
+        AssetSource('lib/core/utils/tenseconds.mp3'),
+      );
+      await _lowTimerWarningPlayer.stop();
+    } catch (_) {}
   }
 
   Future<void> _unlockLowTimerAudioFromGesture() async {
@@ -633,39 +629,27 @@ class _AttemptScreenState extends State<AttemptScreen>
       await _lowTimerWarningPlayer.setVolume(0.0);
 
       if (kIsWeb) {
-        const webAssetUrls = <String>[
-          'assets/lib/core/utils/tenseconds.mp3',
-          'assets/tenseconds.mp3',
-        ];
-        for (final url in webAssetUrls) {
-          try {
-            await _lowTimerWarningPlayer.play(UrlSource(url));
-            await Future<void>.delayed(const Duration(milliseconds: 40));
-            await _lowTimerWarningPlayer.stop();
-            await _lowTimerWarningPlayer.setVolume(1.0);
-            didUnlock = true;
-            break;
-          } catch (_) {}
-        }
+        try {
+          await _lowTimerWarningPlayer.play(
+            UrlSource('assets/lib/core/utils/tenseconds.mp3'),
+          );
+          await Future<void>.delayed(const Duration(milliseconds: 40));
+          await _lowTimerWarningPlayer.stop();
+          await _lowTimerWarningPlayer.setVolume(1.0);
+          didUnlock = true;
+        } catch (_) {}
       }
 
       if (!didUnlock) {
-        const candidateAssetPaths = <String>[
-          'tenseconds.mp3',
-          'core/utils/tenseconds.mp3',
-          'lib/core/utils/tenseconds.mp3',
-          'assets/lib/core/utils/tenseconds.mp3',
-        ];
-        for (final path in candidateAssetPaths) {
-          try {
-            await _lowTimerWarningPlayer.play(AssetSource(path));
-            await Future<void>.delayed(const Duration(milliseconds: 40));
-            await _lowTimerWarningPlayer.stop();
-            await _lowTimerWarningPlayer.setVolume(1.0);
-            didUnlock = true;
-            break;
-          } catch (_) {}
-        }
+        try {
+          await _lowTimerWarningPlayer.play(
+            AssetSource('lib/core/utils/tenseconds.mp3'),
+          );
+          await Future<void>.delayed(const Duration(milliseconds: 40));
+          await _lowTimerWarningPlayer.stop();
+          await _lowTimerWarningPlayer.setVolume(1.0);
+          didUnlock = true;
+        } catch (_) {}
       }
 
       await _lowTimerWarningPlayer.setVolume(1.0);
@@ -692,42 +676,30 @@ class _AttemptScreenState extends State<AttemptScreen>
       await _lowTimerWarningPlayer.setVolume(1.0);
 
       if (kIsWeb) {
-        const webAssetUrls = <String>[
-          'assets/lib/core/utils/tenseconds.mp3',
-          'assets/tenseconds.mp3',
-        ];
-        for (final url in webAssetUrls) {
-          try {
-            for (var i = 0; i < 3; i++) {
-              await _lowTimerWarningPlayer.play(UrlSource(url));
-              didPlayAudio = true;
-              if (i < 2) {
-                await Future<void>.delayed(const Duration(milliseconds: 400));
-              }
-            }
-            break;
-          } catch (_) {}
-        }
-      }
-
-      const candidateAssetPaths = <String>[
-        'tenseconds.mp3',
-        'core/utils/tenseconds.mp3',
-        'lib/core/utils/tenseconds.mp3',
-        'assets/lib/core/utils/tenseconds.mp3',
-      ];
-      for (final path in candidateAssetPaths) {
         try {
           for (var i = 0; i < 3; i++) {
-            await _lowTimerWarningPlayer.play(AssetSource(path));
+            await _lowTimerWarningPlayer.play(
+              UrlSource('assets/lib/core/utils/tenseconds.mp3'),
+            );
             didPlayAudio = true;
             if (i < 2) {
               await Future<void>.delayed(const Duration(milliseconds: 400));
             }
           }
-          break;
         } catch (_) {}
       }
+
+      try {
+        for (var i = 0; i < 3; i++) {
+          await _lowTimerWarningPlayer.play(
+            AssetSource('lib/core/utils/tenseconds.mp3'),
+          );
+          didPlayAudio = true;
+          if (i < 2) {
+            await Future<void>.delayed(const Duration(milliseconds: 400));
+          }
+        }
+      } catch (_) {}
     } catch (_) {}
 
     if (didPlayAudio) return;
@@ -899,7 +871,7 @@ class _AttemptScreenState extends State<AttemptScreen>
                     borderRadius: BorderRadius.circular(AppTheme.radiusMd),
                     boxShadow: [
                       BoxShadow(
-                        color: const Color(0xFF0F172A).withOpacity(0.16),
+                        color: Theme.of(context).shadowColor,
                         blurRadius: 10,
                         offset: const Offset(0, 5),
                       ),
@@ -1006,14 +978,14 @@ class _AttemptScreenState extends State<AttemptScreen>
                                 ? Theme.of(
                                     context,
                                   ).colorScheme.primary.withOpacity(0.08)
-                                : AppTheme.surfaceMuted,
+                                : AppTheme.surfaceMutedOf(context),
                             borderRadius: BorderRadius.circular(
                               AppTheme.radiusMd,
                             ),
                             border: Border.all(
                               color: isSelected
                                   ? Theme.of(context).colorScheme.primary
-                                  : const Color(0xFFE2E8F0),
+                                  : Theme.of(context).dividerColor,
                               width: isSelected ? 1.4 : 1,
                             ),
                           ),
