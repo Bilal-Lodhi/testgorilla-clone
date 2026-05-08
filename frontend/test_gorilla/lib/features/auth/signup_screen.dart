@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:test_gorilla/core/theme/app_theme.dart';
+import 'package:test_gorilla/core/theme/theme_provider.dart';
 import 'package:test_gorilla/features/auth/auth_provider.dart';
 
 class SignupScreen extends StatefulWidget {
@@ -63,7 +65,7 @@ class _SignupScreenState extends State<SignupScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Account created successfully! Please log in.'),
-            backgroundColor: Colors.green,
+            backgroundColor: AppTheme.successColor,
             duration: Duration(seconds: 2),
           ),
         );
@@ -85,14 +87,15 @@ class _SignupScreenState extends State<SignupScreen> {
   @override
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.of(context).size.width < 600;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          icon: Icon(Icons.arrow_back, color: Colors.black),
+          icon: Icon(Icons.arrow_back, color: onSurface),
           onPressed: () => Navigator.of(context).pop(),
         ),
       ),
@@ -106,6 +109,26 @@ class _SignupScreenState extends State<SignupScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  // Theme toggle
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Consumer<ThemeProvider>(
+                      builder: (context, themeProvider, _) {
+                        final isDark = themeProvider.isDarkMode;
+                        return IconButton(
+                          onPressed: themeProvider.toggleTheme,
+                          icon: Icon(
+                            isDark
+                                ? Icons.light_mode_outlined
+                                : Icons.dark_mode_outlined,
+                          ),
+                          tooltip: isDark
+                              ? 'Switch to Light Mode'
+                              : 'Switch to Dark Mode',
+                        );
+                      },
+                    ),
+                  ),
                   // App Logo/Title
                   Text(
                     'TestGorilla',
@@ -119,9 +142,9 @@ class _SignupScreenState extends State<SignupScreen> {
                   Text(
                     'Create Account',
                     textAlign: TextAlign.center,
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodyLarge?.copyWith(color: Colors.grey[600]),
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: onSurface.withOpacity(0.6),
+                    ),
                   ),
                   SizedBox(height: 48),
 
@@ -273,13 +296,14 @@ class _SignupScreenState extends State<SignupScreen> {
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
+                            color: onSurface,
                           ),
                         ),
                         SizedBox(height: 12),
                         Container(
                           decoration: BoxDecoration(
                             border: Border.all(
-                              color: Colors.grey[300]!,
+                              color: Theme.of(context).dividerColor,
                               width: 1,
                             ),
                             borderRadius: BorderRadius.circular(8),
@@ -322,13 +346,15 @@ class _SignupScreenState extends State<SignupScreen> {
                               Container(
                                 padding: EdgeInsets.all(12),
                                 decoration: BoxDecoration(
-                                  color: Colors.red[50],
-                                  border: Border.all(color: Colors.red),
+                                  color: AppTheme.errorColor.withOpacity(0.08),
+                                  border: Border.all(
+                                    color: AppTheme.errorColor.withOpacity(0.5),
+                                  ),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: Text(
                                   _errorMessage!,
-                                  style: TextStyle(color: Colors.red[700]),
+                                  style: TextStyle(color: AppTheme.errorColor),
                                 ),
                               ),
                               SizedBox(height: 16),
@@ -384,7 +410,7 @@ class _SignupScreenState extends State<SignupScreen> {
                         child: RichText(
                           text: TextSpan(
                             text: 'Already have an account? ',
-                            style: TextStyle(color: Colors.grey[700]),
+                            style: TextStyle(color: onSurface.withOpacity(0.7)),
                             children: [
                               TextSpan(
                                 text: 'Log in',
