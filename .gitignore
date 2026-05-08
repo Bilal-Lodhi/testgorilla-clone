@@ -30,6 +30,7 @@ logs/
 copilot-*.md
 claude-*.md
 *.log.md
+PRODUCTION_SAFE_CONFIG.md
 
 # Misc
 .cache/
