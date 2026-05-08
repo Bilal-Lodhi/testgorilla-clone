@@ -23,7 +23,8 @@ class CandidateDashboardShell extends StatefulWidget {
       _CandidateDashboardShellState();
 }
 
-class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
+class _CandidateDashboardShellState extends State<CandidateDashboardShell>
+    with WidgetsBindingObserver {
   late TestService _testService;
   late Future<List<_CandidateAttemptSummary>> _historyFuture;
   String? _selectedAttemptId;
@@ -33,6 +34,9 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
   Map<String, dynamic>? _resumableAttempt;
   bool _isCheckingResume = true;
 
+  /// Track if route was active last time we checked
+  bool _wasRouteActive = true;
+
   @override
   void initState() {
     super.initState();
@@ -40,6 +44,23 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
     _testService = TestService(apiClient);
     _refreshHistory(resetSelection: true);
     unawaited(_checkForResumableAttempt());
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Re-check for resumable attempts when app comes back into focus
+    if (state == AppLifecycleState.resumed) {
+      // ignore: avoid_print
+      print('[Dashboard] App resumed, re-checking for resumable attempts...');
+      unawaited(_checkForResumableAttempt());
+    }
   }
 
   void _refreshHistory({bool resetSelection = false}) {
@@ -55,14 +76,80 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
   /// a Resume button rather than auto-redirecting.
   Future<void> _checkForResumableAttempt() async {
     try {
-      final attemptId = await AttemptStorage.getAttemptId();
-      if (attemptId == null) {
-        if (mounted) setState(() => _isCheckingResume = false);
-        return;
+      Map<String, dynamic>? data;
+
+      // Try local hint first for fast resume, then fall back to server lookup.
+      final localAttemptId = await AttemptStorage.getAttemptId();
+      // ignore: avoid_print
+      print('[Resume] Local attempt ID: $localAttemptId');
+      if (localAttemptId != null && localAttemptId.isNotEmpty) {
+        try {
+          data = await _testService.getAttempt(localAttemptId);
+          // ignore: avoid_print
+          print('[Resume] Local attempt fetch succeeded, data=$data');
+        } catch (e) {
+          // Local storage may be stale; server-side active lookup handles this.
+          // ignore: avoid_print
+          print('[Resume] Local attempt fetch failed: $e');
+          data = null;
+        }
       }
 
-      final data = await _testService.getAttempt(attemptId);
-      final attempt = data['attempt'] as Map<String, dynamic>?;
+      data ??= await _testService.getActiveAttempt();
+      // ignore: avoid_print
+      print(
+        '[Resume] Active attempt fetch: ${data != null ? "found" : "null"}',
+      );
+
+      // Fallback: history endpoint can still tell us about an in-progress
+      // attempt if active lookup fails for any reason.
+      if (data == null) {
+        // ignore: avoid_print
+        print('[Resume] Trying history fallback...');
+        final attempts = await _testService.getCandidateAttempts();
+        // ignore: avoid_print
+        print('[Resume] History count: ${attempts.length}');
+        TestAttempt? latestInProgress;
+        for (final attempt in attempts) {
+          // ignore: avoid_print
+          print(
+            '[Resume] Attempt: id=${attempt.id}, status=${attempt.status}, in_progress=${_isAttemptInProgressStatus(attempt.status)}',
+          );
+          if (_isAttemptInProgressStatus(attempt.status)) {
+            latestInProgress = attempt;
+            break;
+          }
+        }
+
+        if (latestInProgress != null) {
+          // ignore: avoid_print
+          print(
+            '[Resume] Found in-progress from history: ${latestInProgress.id}',
+          );
+          try {
+            data = await _testService.getAttempt(latestInProgress.id);
+            // ignore: avoid_print
+            print('[Resume] Hydrated from history ID, data=$data');
+          } catch (e) {
+            // ignore: avoid_print
+            print('[Resume] History hydrate failed: $e, using minimal data');
+            data = {
+              'attempt': {
+                'id': latestInProgress.id,
+                'test_id': latestInProgress.testId,
+                'status': latestInProgress.status,
+                'start_time': latestInProgress.startTime.toIso8601String(),
+                'test_title': latestInProgress.testTitle,
+              },
+              'test_title': latestInProgress.testTitle,
+            };
+          }
+        }
+      }
+
+      final attempt = data?['attempt'] as Map<String, dynamic>?;
+      // ignore: avoid_print
+      print('[Resume] Final attempt: ${attempt != null ? "found" : "null"}');
 
       if (attempt == null) {
         await AttemptStorage.clear();
@@ -71,10 +158,28 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
       }
 
       final status = (attempt['status'] as String?) ?? '';
+      // ignore: avoid_print
+      print(
+        '[Resume] Final status: $status, is_in_progress=${_isAttemptInProgressStatus(status)}',
+      );
 
-      if (status == 'in_progress') {
+      if (_isAttemptInProgressStatus(status)) {
+        final attemptId = attempt['id'] as String?;
+        final testId = attempt['test_id'] as String?;
+        final duration = _toInt(attempt['duration_minutes']) ?? 60;
+
+        if (attemptId != null && testId != null) {
+          await AttemptStorage.setActiveAttempt(
+            attemptId: attemptId,
+            testId: testId,
+            durationMinutes: duration,
+          );
+        }
+
         // Valid resume target — store for UI
         if (mounted) {
+          // ignore: avoid_print
+          print('[Resume] Setting resumable attempt: $attemptId');
           setState(() {
             _resumableAttempt = data;
             _isCheckingResume = false;
@@ -82,10 +187,14 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
         }
       } else {
         // Submitted, expired, or otherwise done — clear
+        // ignore: avoid_print
+        print('[Resume] Status not in-progress, clearing');
         await AttemptStorage.clear();
         if (mounted) setState(() => _isCheckingResume = false);
       }
-    } catch (_) {
+    } catch (e) {
+      // ignore: avoid_print
+      print('[Resume] Exception: $e');
       if (mounted) setState(() => _isCheckingResume = false);
       // Keep storage for later retry
     }
@@ -105,11 +214,7 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
   Future<_CandidateAttemptSummary> _buildSummaryForAttempt(
     TestAttempt attempt,
   ) async {
-    final normalizedStatus = attempt.status.toLowerCase();
-
-    if (normalizedStatus == 'in_progress' ||
-        normalizedStatus == 'ongoing' ||
-        normalizedStatus == 'draft') {
+    if (_isAttemptInProgressStatus(attempt.status)) {
       return _CandidateAttemptSummary(
         attempt: attempt,
         testTitle: attempt.testTitle?.trim().isNotEmpty == true
@@ -254,6 +359,18 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
     }
   }
 
+  bool _isAttemptInProgressStatus(String? status) {
+    if (status == null) return false;
+    final normalized = status
+        .trim()
+        .toLowerCase()
+        .replaceAll('-', '_')
+        .replaceAll(' ', '_');
+    return normalized == 'in_progress' ||
+        normalized == 'ongoing' ||
+        normalized == 'draft';
+  }
+
   String _formatDateTime(DateTime? value) {
     if (value == null) return 'Unknown';
     final local = value.toLocal();
@@ -265,7 +382,15 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
 
   /// Build a "Resume Test" banner shown when an active attempt exists
   Widget _buildResumeBanner() {
+    // ignore: avoid_print
+    print(
+      '[Banner] Building... _isCheckingResume=$_isCheckingResume, _resumableAttempt=${_resumableAttempt != null}',
+    );
     if (_isCheckingResume || _resumableAttempt == null) {
+      // ignore: avoid_print
+      print(
+        '[Banner] Returning shrink (checking=$_isCheckingResume, attempt=${_resumableAttempt == null})',
+      );
       return const SizedBox.shrink();
     }
 
@@ -304,69 +429,124 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
+    final bgColor = isDark ? const Color(0xFF3D1F0A) : Colors.orange.shade50;
+    final iconColor = isDark ? Colors.orange.shade300 : Colors.orange.shade700;
+    final titleColor = isDark ? Colors.orange.shade200 : Colors.orange.shade900;
+    final subtitleColor = isDark
+        ? Colors.orange.shade300
+        : Colors.orange.shade800;
+    final remainingColor = isDark
+        ? Colors.orange.shade400
+        : Colors.orange.shade600;
+    final btnBg = isDark ? Colors.orange.shade800 : Colors.orange.shade700;
+
     return Card(
-      color: isDark ? const Color(0xFF2D1A0E) : Colors.orange.shade50,
+      color: bgColor,
       margin: const EdgeInsets.only(bottom: 16),
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Icon(
-              Icons.play_circle_filled,
-              color: isDark ? Colors.orange.shade300 : Colors.orange.shade700,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final isNarrow = constraints.maxWidth < 380;
+            if (isNarrow) {
+              return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'You have an active test in progress',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: isDark
-                          ? Colors.orange.shade200
-                          : Colors.orange.shade900,
-                    ),
+                  Row(
+                    children: [
+                      Icon(Icons.play_circle_filled, color: iconColor),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'You have an active test in progress',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            color: titleColor,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 6),
                   Text(
                     testTitle,
-                    maxLines: 1,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: isDark
-                          ? Colors.orange.shade300
-                          : Colors.orange.shade800,
-                    ),
+                    style: TextStyle(fontSize: 13, color: subtitleColor),
                   ),
-                  if (remainingText.isNotEmpty)
+                  if (remainingText.isNotEmpty) ...[
+                    const SizedBox(height: 4),
                     Text(
                       remainingText,
                       style: TextStyle(
                         fontSize: 12,
-                        color: isDark
-                            ? Colors.orange.shade400
-                            : Colors.orange.shade600,
+                        color: remainingColor,
                         fontWeight: FontWeight.w500,
                       ),
                     ),
+                  ],
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: _resumeTest,
+                      icon: const Icon(Icons.play_arrow, size: 18),
+                      label: const Text('Resume'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: btnBg,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
                 ],
-              ),
-            ),
-            ElevatedButton.icon(
-              onPressed: _resumeTest,
-              icon: const Icon(Icons.play_arrow, size: 18),
-              label: const Text('Resume'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: isDark
-                    ? Colors.orange.shade800
-                    : Colors.orange.shade700,
-                foregroundColor: Colors.white,
-              ),
-            ),
-          ],
+              );
+            }
+            return Row(
+              children: [
+                Icon(Icons.play_circle_filled, color: iconColor),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'You have an active test in progress',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: titleColor,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        testTitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 13, color: subtitleColor),
+                      ),
+                      if (remainingText.isNotEmpty)
+                        Text(
+                          remainingText,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: remainingColor,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                ElevatedButton.icon(
+                  onPressed: _resumeTest,
+                  icon: const Icon(Icons.play_arrow, size: 18),
+                  label: const Text('Resume'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: btnBg,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -503,6 +683,15 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
 
   @override
   Widget build(BuildContext context) {
+    // Mobile route visibility detection: re-check resume when route becomes active
+    final isRouteCurrent = ModalRoute.of(context)?.isCurrent ?? true;
+    if (isRouteCurrent && !_wasRouteActive) {
+      // ignore: avoid_print
+      print('[Dashboard] Route became active (mobile), re-checking resume...');
+      unawaited(_checkForResumableAttempt());
+    }
+    _wasRouteActive = isRouteCurrent;
+
     final isWideLayout = MediaQuery.of(context).size.width >= 900;
 
     return Consumer<AuthProvider>(
