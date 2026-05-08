@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:test_gorilla/core/api/api_client.dart';
 import 'package:test_gorilla/core/constants/api_constants.dart';
 import 'package:test_gorilla/core/theme/app_theme.dart';
+import 'package:test_gorilla/core/theme/theme_provider.dart';
 import 'package:test_gorilla/features/auth/auth_provider.dart';
 import 'package:test_gorilla/features/shared/models/models.dart';
 import 'package:test_gorilla/features/shared/widgets/app_widgets.dart'
@@ -257,7 +258,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       Text(
                         'Submitted at: $submittedAt | Pending answers: ${attempt['pendingCount'] ?? responses.length}',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: const Color(0xFF64748B),
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onSurface.withOpacity(0.5),
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -271,8 +274,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                             borderRadius: BorderRadius.circular(
                               AppTheme.radiusMd,
                             ),
-                            color: const Color(0xFFF8FAFC),
-                            border: Border.all(color: const Color(0xFFE2E8F0)),
+                            color: AppTheme.surfaceMutedOf(context),
+                            border: Border.all(
+                              color: Theme.of(context).dividerColor,
+                            ),
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -303,10 +308,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                 width: double.infinity,
                                 padding: const EdgeInsets.all(10),
                                 decoration: BoxDecoration(
-                                  color: Colors.white,
+                                  color: Theme.of(context).colorScheme.surface,
                                   borderRadius: BorderRadius.circular(10),
                                   border: Border.all(
-                                    color: const Color(0xFFE2E8F0),
+                                    color: Theme.of(context).dividerColor,
                                   ),
                                 ),
                                 child: SelectableText(
@@ -604,13 +609,36 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                             ? 'Review coding/written answers waiting for manual evaluation.'
                             : 'View detailed analytics and statistics.',
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: const Color(0xFF64748B),
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onSurface.withOpacity(0.5),
                         ),
                       ),
                     ],
                   ),
                 ),
                 const SizedBox(width: 16),
+                Consumer<ThemeProvider>(
+                  builder: (context, themeProvider, _) {
+                    final isDark = themeProvider.isDarkMode;
+                    return IconButton(
+                      onPressed: themeProvider.toggleTheme,
+                      icon: Icon(
+                        isDark
+                            ? Icons.light_mode_outlined
+                            : Icons.dark_mode_outlined,
+                      ),
+                      tooltip: isDark
+                          ? 'Switch to Light Mode'
+                          : 'Switch to Dark Mode',
+                      style: IconButton.styleFrom(
+                        foregroundColor: Theme.of(
+                          context,
+                        ).colorScheme.onSurface,
+                      ),
+                    );
+                  },
+                ),
                 if (_currentTab == 0)
                   ElevatedButton.icon(
                     onPressed: _createTest,
@@ -657,21 +685,21 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   Icon(
                     Icons.bar_chart_outlined,
                     size: 64,
-                    color: Colors.grey[300],
+                    color: Theme.of(context).disabledColor,
                   ),
                   const SizedBox(height: 16),
                   Text(
                     'Analytics Coming Soon',
-                    style: Theme.of(
-                      context,
-                    ).textTheme.titleLarge?.copyWith(color: Colors.grey),
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: Theme.of(context).disabledColor,
+                    ),
                   ),
                   const SizedBox(height: 8),
                   Text(
                     'Detailed analytics and test statistics will be available soon.',
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodyMedium?.copyWith(color: Colors.grey),
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context).disabledColor,
+                    ),
                     textAlign: TextAlign.center,
                   ),
                 ],
@@ -759,13 +787,36 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                             ? 'Review coding/written answers waiting for manual evaluation.'
                             : 'View detailed analytics and statistics.',
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: const Color(0xFF64748B),
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onSurface.withOpacity(0.5),
                         ),
                       ),
                     ],
                   ),
                 ),
                 const SizedBox(width: 16),
+                Consumer<ThemeProvider>(
+                  builder: (context, themeProvider, _) {
+                    final isDark = themeProvider.isDarkMode;
+                    return IconButton(
+                      onPressed: themeProvider.toggleTheme,
+                      icon: Icon(
+                        isDark
+                            ? Icons.light_mode_outlined
+                            : Icons.dark_mode_outlined,
+                      ),
+                      tooltip: isDark
+                          ? 'Switch to Light Mode'
+                          : 'Switch to Dark Mode',
+                      style: IconButton.styleFrom(
+                        foregroundColor: Theme.of(
+                          context,
+                        ).colorScheme.onSurface,
+                      ),
+                    );
+                  },
+                ),
                 if (_currentTab == 0)
                   ElevatedButton.icon(
                     onPressed: _createTest,
@@ -812,21 +863,22 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   Icon(
                     Icons.bar_chart_outlined,
                     size: 64,
-                    color: Colors.grey[300],
+                    color: Theme.of(context).disabledColor,
                   ),
                   const SizedBox(height: 16),
                   Text(
                     'Analytics Coming Soon',
-                    style: Theme.of(
-                      context,
-                    ).textTheme.titleLarge?.copyWith(color: Colors.grey),
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: Theme.of(context).disabledColor,
+                    ),
                   ),
                   const SizedBox(height: 8),
                   Text(
                     'Detailed analytics and test statistics will be available soon.',
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodyMedium?.copyWith(color: Colors.grey),
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context).disabledColor,
+                    ),
+                    textAlign: TextAlign.center,
                   ),
                 ],
               ),
