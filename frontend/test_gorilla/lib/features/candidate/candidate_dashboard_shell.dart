@@ -7,6 +7,7 @@ import 'package:test_gorilla/core/api/api_client.dart';
 import 'package:test_gorilla/core/storage/attempt_storage.dart';
 import 'package:test_gorilla/core/storage/access_code_storage.dart';
 import 'package:test_gorilla/core/theme/app_theme.dart';
+import 'package:test_gorilla/core/theme/theme_provider.dart';
 import 'package:test_gorilla/features/auth/auth_provider.dart';
 import 'package:test_gorilla/features/candidate/test_list_screen.dart';
 import 'package:test_gorilla/features/candidate/test_service.dart';
@@ -300,14 +301,20 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
       }
     }
 
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
     return Card(
-      color: Colors.orange.shade50,
+      color: isDark ? const Color(0xFF2D1A0E) : Colors.orange.shade50,
       margin: const EdgeInsets.only(bottom: 16),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Row(
           children: [
-            Icon(Icons.play_circle_filled, color: Colors.orange.shade700),
+            Icon(
+              Icons.play_circle_filled,
+              color: isDark ? Colors.orange.shade300 : Colors.orange.shade700,
+            ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -317,7 +324,9 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
                     'You have an active test in progress',
                     style: TextStyle(
                       fontWeight: FontWeight.w600,
-                      color: Colors.orange.shade900,
+                      color: isDark
+                          ? Colors.orange.shade200
+                          : Colors.orange.shade900,
                     ),
                   ),
                   const SizedBox(height: 2),
@@ -327,7 +336,9 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 13,
-                      color: Colors.orange.shade800,
+                      color: isDark
+                          ? Colors.orange.shade300
+                          : Colors.orange.shade800,
                     ),
                   ),
                   if (remainingText.isNotEmpty)
@@ -335,7 +346,9 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
                       remainingText,
                       style: TextStyle(
                         fontSize: 12,
-                        color: Colors.orange.shade600,
+                        color: isDark
+                            ? Colors.orange.shade400
+                            : Colors.orange.shade600,
                         fontWeight: FontWeight.w500,
                       ),
                     ),
@@ -347,7 +360,9 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
               icon: const Icon(Icons.play_arrow, size: 18),
               label: const Text('Resume'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.orange.shade700,
+                backgroundColor: isDark
+                    ? Colors.orange.shade800
+                    : Colors.orange.shade700,
                 foregroundColor: Colors.white,
               ),
             ),
@@ -512,6 +527,22 @@ class _CandidateDashboardShellState extends State<CandidateDashboardShell> {
                     ),
                   ),
             actions: [
+              Consumer<ThemeProvider>(
+                builder: (context, themeProvider, _) {
+                  final isDark = themeProvider.isDarkMode;
+                  return IconButton(
+                    onPressed: themeProvider.toggleTheme,
+                    icon: Icon(
+                      isDark
+                          ? Icons.light_mode_outlined
+                          : Icons.dark_mode_outlined,
+                    ),
+                    tooltip: isDark
+                        ? 'Switch to Light Mode'
+                        : 'Switch to Dark Mode',
+                  );
+                },
+              ),
               IconButton(
                 icon: const Icon(Icons.delete_outline),
                 onPressed: () => _showDeleteAccountDialog(context),
@@ -640,8 +671,8 @@ class _HistorySidebar extends StatelessWidget {
 
   Color _statusColor(_CandidateAttemptSummary summary, BuildContext context) {
     if (summary.hasPendingReview) return AppTheme.warningColor;
-    if (summary.isPassed == true) return Colors.green;
-    if (summary.isPassed == false) return Colors.red;
+    if (summary.isPassed == true) return AppTheme.successColor;
+    if (summary.isPassed == false) return AppTheme.errorColor;
     return Theme.of(context).colorScheme.primary;
   }
 
@@ -779,7 +810,7 @@ class _HistorySidebar extends StatelessWidget {
           'Track recent attempts and open the detailed result view.',
           style: Theme.of(
             context,
-          ).textTheme.bodySmall?.copyWith(color: Colors.grey[600]),
+          ).textTheme.bodySmall?.copyWith(color: AppTheme.subtext(context)),
         ),
         const SizedBox(height: 16),
         Card(
@@ -952,7 +983,7 @@ class _HistorySidebar extends StatelessWidget {
                             ? 'Submitted ${formatDateTime(item.completedAt)}'
                             : 'In progress',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.grey[600],
+                          color: AppTheme.subtext(context),
                         ),
                       ),
                     ],
@@ -962,8 +993,8 @@ class _HistorySidebar extends StatelessWidget {
             ),
           );
         }).toList(),
-        Padding(
-          padding: const EdgeInsets.only(bottom: 16),
+        const Padding(
+          padding: EdgeInsets.only(bottom: 16),
           child: SizedBox.shrink(),
         ),
       ],
@@ -999,7 +1030,7 @@ class _StatPill extends StatelessWidget {
             label,
             style: Theme.of(
               context,
-            ).textTheme.bodySmall?.copyWith(color: Colors.grey[600]),
+            ).textTheme.bodySmall?.copyWith(color: AppTheme.subtext(context)),
           ),
         ],
       ),
