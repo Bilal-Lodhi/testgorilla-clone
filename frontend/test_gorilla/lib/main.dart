@@ -6,6 +6,7 @@ import 'package:test_gorilla/core/config/app_config.dart';
 import 'package:test_gorilla/core/config/config_validator.dart';
 import 'package:test_gorilla/core/constants/api_constants.dart';
 import 'package:test_gorilla/core/theme/app_theme.dart';
+import 'package:test_gorilla/core/theme/theme_provider.dart';
 import 'package:test_gorilla/features/auth/auth_provider.dart';
 import 'package:test_gorilla/features/auth/login_screen.dart';
 import 'package:test_gorilla/features/navigation/app_router.dart';
@@ -27,11 +28,16 @@ void main() async {
   // Initialize JWT storage
   await JwtStorage.init();
 
-  runApp(const MyApp());
+  // Initialize theme provider (restore persisted preference)
+  final themeProvider = ThemeProvider();
+  await themeProvider.init();
+
+  runApp(MyApp(themeProvider: themeProvider));
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({Key? key}) : super(key: key);
+  final ThemeProvider themeProvider;
+  const MyApp({Key? key, required this.themeProvider}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -46,13 +52,22 @@ class MyApp extends StatelessWidget {
 
         // Auth Provider
         ChangeNotifierProvider(create: (_) => authProvider),
+
+        // Theme Provider
+        ChangeNotifierProvider<ThemeProvider>.value(value: themeProvider),
       ],
-      child: MaterialApp(
-        title: AppConfig.appName,
-        theme: AppTheme.lightTheme,
-        debugShowCheckedModeBanner: false,
-        home: const SplashScreenWrapper(),
-        onGenerateRoute: AppRouter.generateRoute,
+      child: Consumer<ThemeProvider>(
+        builder: (context, themeProvider, _) {
+          return MaterialApp(
+            title: AppConfig.appName,
+            theme: AppTheme.lightTheme,
+            darkTheme: AppTheme.darkTheme,
+            themeMode: themeProvider.themeMode,
+            debugShowCheckedModeBanner: false,
+            home: const SplashScreenWrapper(),
+            onGenerateRoute: AppRouter.generateRoute,
+          );
+        },
       ),
     );
   }
@@ -105,7 +120,7 @@ class _SplashScreenWrapperState extends State<SplashScreenWrapper> {
   Widget build(BuildContext context) {
     if (_showSplash) {
       return Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         body: Center(
           child: Image.asset(
             'assets/images/main.png',
