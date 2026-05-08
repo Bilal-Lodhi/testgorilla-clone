@@ -137,9 +137,9 @@ class EmptyStateWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final mutedText = Theme.of(
-      context,
-    ).textTheme.bodyMedium?.copyWith(color: Colors.grey[600]);
+    final mutedText = Theme.of(context).textTheme.bodyMedium?.copyWith(
+      color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+    );
 
     return Center(
       child: Card(
@@ -149,7 +149,11 @@ class EmptyStateWidget extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, size: 56, color: Colors.grey[400]),
+              Icon(
+                icon,
+                size: 56,
+                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.4),
+              ),
               const SizedBox(height: 14),
               Text(title, style: Theme.of(context).textTheme.titleLarge),
               if (subtitle != null) ...[
@@ -217,18 +221,21 @@ class GlassPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFFFFFFFF), Color(0xFFFAFCFF)],
+        gradient: LinearGradient(
+          colors: isDark
+              ? [const Color(0xFF1E293B), const Color(0xFF1A2332)]
+              : [const Color(0xFFFFFFFF), const Color(0xFFFAFCFF)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-        border: Border.all(color: const Color(0xFFE2E8F0), width: 1),
+        border: Border.all(color: Theme.of(context).dividerColor, width: 1),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF0F172A).withOpacity(0.04),
+            color: Theme.of(context).shadowColor,
             blurRadius: 20,
             offset: const Offset(0, 8),
           ),
@@ -246,7 +253,7 @@ class StatusBadge extends StatelessWidget {
   const StatusBadge({Key? key, required this.label, required this.status})
     : super(key: key);
 
-  Color _statusColor() {
+  Color _statusColor(BuildContext context) {
     switch (status.toLowerCase()) {
       case 'published':
       case 'passed':
@@ -260,13 +267,13 @@ class StatusBadge extends StatelessWidget {
       case 'error':
         return AppTheme.errorColor;
       default:
-        return const Color(0xFF64748B);
+        return Theme.of(context).colorScheme.onSurface.withOpacity(0.5);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final color = _statusColor();
+    final color = _statusColor(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
@@ -319,15 +326,16 @@ class TestCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final muted = Theme.of(
-      context,
-    ).textTheme.bodySmall?.copyWith(color: const Color(0xFF64748B));
+    final muted = Theme.of(context).textTheme.bodySmall?.copyWith(
+      color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
+    );
     final baseCardColor = Theme.of(context).cardColor;
     final cardColor = highlightColor == null
         ? baseCardColor
         : Color.alphaBlend(highlightColor!.withOpacity(0.08), baseCardColor);
+    final dividerColor = Theme.of(context).dividerColor;
     final borderColor = highlightColor == null
-        ? const Color(0xFFE2E8F0)
+        ? dividerColor
         : highlightColor!.withOpacity(0.32);
 
     return Card(
@@ -444,16 +452,21 @@ class _InfoPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
-        color: AppTheme.surfaceMuted,
+        color: isDark ? AppTheme.surfaceMutedDark : AppTheme.surfaceMuted,
         borderRadius: BorderRadius.circular(999),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 15, color: const Color(0xFF64748B)),
+          Icon(
+            icon,
+            size: 15,
+            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
+          ),
           const SizedBox(width: 6),
           Text(label, style: Theme.of(context).textTheme.bodySmall),
         ],
