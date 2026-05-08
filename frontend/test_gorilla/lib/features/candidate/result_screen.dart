@@ -34,6 +34,9 @@ class _ResultScreenState extends State<ResultScreen> {
     return fallback;
   }
 
+  Color _secondaryTextColor(BuildContext context) =>
+      Theme.of(context).colorScheme.onSurface.withOpacity(0.5);
+
   @override
   void initState() {
     super.initState();
@@ -217,7 +220,9 @@ class _ResultScreenState extends State<ResultScreen> {
                                 : isPassed
                                 ? AppTheme.successColor
                                 : AppTheme.errorColor,
-                            backgroundColor: const Color(0xFFE2E8F0),
+                            backgroundColor: Theme.of(
+                              context,
+                            ).colorScheme.surfaceContainerHighest,
                           ),
                         ),
                       ],
@@ -243,7 +248,7 @@ class _ResultScreenState extends State<ResultScreen> {
                           Text(
                             'Reviewed manual answers: $reviewedManualCount | Pending manual answers: $pendingManualCount',
                             style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(color: const Color(0xFF64748B)),
+                                ?.copyWith(color: _secondaryTextColor(context)),
                           ),
                         ],
                       ),
@@ -270,7 +275,7 @@ class _ResultScreenState extends State<ResultScreen> {
                           title: 'Coding Correct',
                           value: '$correctCodingCount / $totalCodingQuestions',
                           color: totalCodingQuestions == 0
-                              ? const Color(0xFF64748B)
+                              ? _secondaryTextColor(context)
                               : (correctCodingCount == totalCodingQuestions
                                     ? AppTheme.successColor
                                     : AppTheme.warningColor),
@@ -438,9 +443,9 @@ class _ResultScreenState extends State<ResultScreen> {
             const SizedBox(height: 8),
             Text(
               'Marks: $marksObtained / $maxMarks',
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: const Color(0xFF64748B)),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: _secondaryTextColor(context),
+              ),
             ),
           ],
         ),
@@ -463,6 +468,22 @@ class _ResultScreenState extends State<ResultScreen> {
     final hasReviewNotes =
         reviewNotes is String && reviewNotes.trim().isNotEmpty;
     final hasAnswer = codeAnswer is String && codeAnswer.trim().isNotEmpty;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    // Code block colors - always dark-themed like an IDE
+    final codeBlockBg = isDark
+        ? AppTheme.surfaceMutedDark
+        : const Color(0xFF1E293B);
+    final codeBlockBorder = isDark
+        ? AppTheme.borderDark
+        : const Color(0xFF334155);
+    final codeTextColor = isDark
+        ? AppTheme.onSurfaceDark
+        : const Color(0xFFE2E8F0);
+    final reviewerFeedbackBg = isDark
+        ? AppTheme.surfaceMutedDark
+        : const Color(0xFF0F172A);
+    final infoAccentColor = AppTheme.accentColor;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
@@ -483,7 +504,7 @@ class _ResultScreenState extends State<ResultScreen> {
                   decoration: BoxDecoration(
                     color: type == 'coding'
                         ? AppTheme.primaryColor.withOpacity(0.1)
-                        : const Color(0xFF8B5CF6).withOpacity(0.1),
+                        : AppTheme.secondaryColor.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
@@ -491,7 +512,7 @@ class _ResultScreenState extends State<ResultScreen> {
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
                       color: type == 'coding'
                           ? AppTheme.primaryColor
-                          : const Color(0xFF8B5CF6),
+                          : AppTheme.secondaryColor,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 1.0,
                     ),
@@ -521,7 +542,7 @@ class _ResultScreenState extends State<ResultScreen> {
                 'Your Answer:',
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
                   fontWeight: FontWeight.w700,
-                  color: const Color(0xFF64748B),
+                  color: _secondaryTextColor(context),
                 ),
               ),
               const SizedBox(height: 6),
@@ -529,15 +550,15 @@ class _ResultScreenState extends State<ResultScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF1E293B),
+                  color: codeBlockBg,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFF334155)),
+                  border: Border.all(color: codeBlockBorder),
                 ),
                 child: SelectableText(
                   codeAnswer,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     fontFamily: 'monospace',
-                    color: const Color(0xFFE2E8F0),
+                    color: codeTextColor,
                   ),
                 ),
               ),
@@ -547,7 +568,7 @@ class _ResultScreenState extends State<ResultScreen> {
                 'No answer submitted',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   fontStyle: FontStyle.italic,
-                  color: const Color(0xFF64748B),
+                  color: _secondaryTextColor(context),
                 ),
               ),
             ],
@@ -564,7 +585,7 @@ class _ResultScreenState extends State<ResultScreen> {
                       ? 'Marks: $marksObtained / $maxMarks'
                       : 'Max Marks: $maxMarks (not yet graded)',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: const Color(0xFF94A3B8),
+                    color: _secondaryTextColor(context),
                   ),
                 ),
               ],
@@ -573,21 +594,21 @@ class _ResultScreenState extends State<ResultScreen> {
             // Admin Review Notes
             if (isReviewed && hasReviewNotes) ...[
               const SizedBox(height: 14),
-              const Divider(color: Color(0xFF334155)),
+              Divider(color: Theme.of(context).dividerColor),
               const SizedBox(height: 10),
               Row(
                 children: [
-                  const Icon(
+                  Icon(
                     Icons.rate_review_outlined,
                     size: 18,
-                    color: Color(0xFF38BDF8),
+                    color: infoAccentColor,
                   ),
                   const SizedBox(width: 8),
                   Text(
                     'Reviewer Feedback:',
                     style: Theme.of(context).textTheme.labelMedium?.copyWith(
                       fontWeight: FontWeight.w700,
-                      color: const Color(0xFF38BDF8),
+                      color: infoAccentColor,
                     ),
                   ),
                 ],
@@ -597,11 +618,9 @@ class _ResultScreenState extends State<ResultScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF0F172A),
+                  color: reviewerFeedbackBg,
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: const Color(0xFF38BDF8).withOpacity(0.3),
-                  ),
+                  border: Border.all(color: infoAccentColor.withOpacity(0.3)),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -609,7 +628,9 @@ class _ResultScreenState extends State<ResultScreen> {
                     Text(
                       reviewNotes,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: const Color(0xFFCBD5E1),
+                        color: isDark
+                            ? AppTheme.onSurfaceDark
+                            : const Color(0xFFCBD5E1),
                         height: 1.6,
                       ),
                     ),
@@ -618,7 +639,7 @@ class _ResultScreenState extends State<ResultScreen> {
                       Text(
                         'Reviewed on ${_formatDateTime(reviewedAt)}',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: const Color(0xFF64748B),
+                          color: _secondaryTextColor(context),
                         ),
                       ),
                     ],
@@ -630,21 +651,21 @@ class _ResultScreenState extends State<ResultScreen> {
             // No review notes message
             if (isReviewed && !hasReviewNotes) ...[
               const SizedBox(height: 14),
-              const Divider(color: Color(0xFF334155)),
+              Divider(color: Theme.of(context).dividerColor),
               const SizedBox(height: 10),
               Row(
                 children: [
-                  const Icon(
+                  Icon(
                     Icons.info_outline,
                     size: 18,
-                    color: Color(0xFF64748B),
+                    color: _secondaryTextColor(context),
                   ),
                   const SizedBox(width: 8),
                   Text(
                     'Reviewed with no additional feedback notes.',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       fontStyle: FontStyle.italic,
-                      color: const Color(0xFF64748B),
+                      color: _secondaryTextColor(context),
                     ),
                   ),
                 ],
@@ -735,9 +756,9 @@ class _SummaryMetricCard extends StatelessWidget {
         children: [
           Text(
             title,
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(color: const Color(0xFF64748B)),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
+            ),
           ),
           const SizedBox(height: 8),
           Text(
