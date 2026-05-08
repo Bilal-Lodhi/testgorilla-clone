@@ -1,30 +1,68 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:test_gorilla/main.dart';
+import 'package:test_gorilla/core/theme/theme_provider.dart';
+import 'package:test_gorilla/core/theme/app_theme.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  testWidgets('ThemeProvider defaults to light mode', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    final themeProvider = ThemeProvider();
+    await themeProvider.init();
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    expect(themeProvider.isDarkMode, false);
+    expect(themeProvider.themeMode, ThemeMode.light);
+  });
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+  testWidgets('ThemeProvider toggles between light and dark', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+
+    final themeProvider = ThemeProvider();
+    await themeProvider.init();
+
+    await themeProvider.toggleTheme();
+    expect(themeProvider.isDarkMode, true);
+    expect(themeProvider.themeMode, ThemeMode.dark);
+
+    await themeProvider.toggleTheme();
+    expect(themeProvider.isDarkMode, false);
+    expect(themeProvider.themeMode, ThemeMode.light);
+  });
+
+  testWidgets('ThemeProvider persists dark mode preference', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+
+    final themeProvider = ThemeProvider();
+    await themeProvider.init();
+    await themeProvider.toggleTheme(); // switch to dark
+
+    // Create a new provider instance that should read the persisted value
+    final newProvider = ThemeProvider();
+    await newProvider.init();
+
+    expect(newProvider.isDarkMode, true);
+    expect(newProvider.themeMode, ThemeMode.dark);
+  });
+
+  test('Light theme has expected structure', () {
+    final lightTheme = AppTheme.lightTheme;
+    expect(lightTheme.brightness, Brightness.light);
+    expect(lightTheme.useMaterial3, true);
+    expect(lightTheme.colorScheme.primary, isA<Color>());
+  });
+
+  test('Dark theme has expected structure', () {
+    final darkTheme = AppTheme.darkTheme;
+    expect(darkTheme.brightness, Brightness.dark);
+    expect(darkTheme.useMaterial3, true);
+    expect(darkTheme.colorScheme.primary, isA<Color>());
   });
 }
