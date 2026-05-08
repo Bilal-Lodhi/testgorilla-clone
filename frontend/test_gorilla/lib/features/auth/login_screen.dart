@@ -79,6 +79,27 @@ class _LoginScreenState extends State<LoginScreen> {
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        automaticallyImplyLeading: false,
+        actions: [
+          Consumer<ThemeProvider>(
+            builder: (context, themeProvider, _) {
+              final isDark = themeProvider.isDarkMode;
+              return IconButton(
+                onPressed: themeProvider.toggleTheme,
+                icon: Icon(
+                  isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+                ),
+                tooltip: isDark
+                    ? 'Switch to Light Mode'
+                    : 'Switch to Dark Mode',
+              );
+            },
+          ),
+        ],
+      ),
       body: Center(
         child: SingleChildScrollView(
           child: Padding(
@@ -89,26 +110,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Theme toggle
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: Consumer<ThemeProvider>(
-                      builder: (context, themeProvider, _) {
-                        final isDark = themeProvider.isDarkMode;
-                        return IconButton(
-                          onPressed: themeProvider.toggleTheme,
-                          icon: Icon(
-                            isDark
-                                ? Icons.light_mode_outlined
-                                : Icons.dark_mode_outlined,
-                          ),
-                          tooltip: isDark
-                              ? 'Switch to Light Mode'
-                              : 'Switch to Dark Mode',
-                        );
-                      },
-                    ),
-                  ),
                   // App Logo/Title
                   Text(
                     'TestGorilla',
