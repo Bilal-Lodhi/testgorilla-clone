@@ -207,26 +207,65 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             app_widgets.GlassPanel(
-              child: Row(
-                children: [
-                  const Icon(Icons.rate_review_outlined, size: 26),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Pending Evaluations (${pendingEvaluations.length} attempts)',
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                  ),
-                  TextButton.icon(
-                    onPressed: () {
-                      setState(() {
-                        _loadPendingEvaluations();
-                      });
-                    },
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('Refresh'),
-                  ),
-                ],
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final isNarrow = constraints.maxWidth < 500;
+                  if (isNarrow) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.rate_review_outlined, size: 26),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                'Pending Evaluations (${pendingEvaluations.length} attempts)',
+                                style: Theme.of(context).textTheme.titleLarge,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton.icon(
+                            onPressed: () {
+                              setState(() {
+                                _loadPendingEvaluations();
+                              });
+                            },
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('Refresh'),
+                          ),
+                        ),
+                      ],
+                    );
+                  }
+                  return Row(
+                    children: [
+                      const Icon(Icons.rate_review_outlined, size: 26),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Pending Evaluations (${pendingEvaluations.length} attempts)',
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: () {
+                          setState(() {
+                            _loadPendingEvaluations();
+                          });
+                        },
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Refresh'),
+                      ),
+                    ],
+                  );
+                },
               ),
             ),
             const SizedBox(height: 16),
@@ -617,28 +656,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     ],
                   ),
                 ),
-                const SizedBox(width: 16),
-                Consumer<ThemeProvider>(
-                  builder: (context, themeProvider, _) {
-                    final isDark = themeProvider.isDarkMode;
-                    return IconButton(
-                      onPressed: themeProvider.toggleTheme,
-                      icon: Icon(
-                        isDark
-                            ? Icons.light_mode_outlined
-                            : Icons.dark_mode_outlined,
-                      ),
-                      tooltip: isDark
-                          ? 'Switch to Light Mode'
-                          : 'Switch to Dark Mode',
-                      style: IconButton.styleFrom(
-                        foregroundColor: Theme.of(
-                          context,
-                        ).colorScheme.onSurface,
-                      ),
-                    );
-                  },
-                ),
                 if (_currentTab == 0)
                   ElevatedButton.icon(
                     onPressed: _createTest,
@@ -794,28 +811,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       ),
                     ],
                   ),
-                ),
-                const SizedBox(width: 16),
-                Consumer<ThemeProvider>(
-                  builder: (context, themeProvider, _) {
-                    final isDark = themeProvider.isDarkMode;
-                    return IconButton(
-                      onPressed: themeProvider.toggleTheme,
-                      icon: Icon(
-                        isDark
-                            ? Icons.light_mode_outlined
-                            : Icons.dark_mode_outlined,
-                      ),
-                      tooltip: isDark
-                          ? 'Switch to Light Mode'
-                          : 'Switch to Dark Mode',
-                      style: IconButton.styleFrom(
-                        foregroundColor: Theme.of(
-                          context,
-                        ).colorScheme.onSurface,
-                      ),
-                    );
-                  },
                 ),
                 if (_currentTab == 0)
                   ElevatedButton.icon(
@@ -1147,6 +1142,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               )
             : null,
         actions: [
+          Consumer<ThemeProvider>(
+            builder: (context, themeProvider, _) {
+              final isDark = themeProvider.isDarkMode;
+              return IconButton(
+                onPressed: themeProvider.toggleTheme,
+                icon: Icon(
+                  isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+                ),
+                tooltip: isDark
+                    ? 'Switch to Light Mode'
+                    : 'Switch to Dark Mode',
+              );
+            },
+          ),
           IconButton(
             onPressed: _showLogoutDialog,
             icon: const Icon(Icons.logout),
