@@ -1,8 +1,4 @@
-import 'package:flutter/foundation.dart';
-
 class ApiConstants {
-  static const String _apiPath = '/api/v1';
-
   /// Production-safe base URL from build-time environment variable
   /// NO fallback values - must be provided via --dart-define=API_BASE_URL=...
   static const String baseUrl = String.fromEnvironment('API_BASE_URL');
