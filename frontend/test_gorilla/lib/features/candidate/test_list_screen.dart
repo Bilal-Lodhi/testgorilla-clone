@@ -103,7 +103,11 @@ class _TestListScreenState extends State<TestListScreen> {
                           Text(
                             'Pick a published assessment and start when you are ready.',
                             style: Theme.of(context).textTheme.bodyMedium
-                                ?.copyWith(color: const Color(0xFF64748B)),
+                                ?.copyWith(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurface.withOpacity(0.5),
+                                ),
                           ),
                         ],
                       ),
@@ -127,7 +131,9 @@ class _TestListScreenState extends State<TestListScreen> {
                     duration: test.durationMinutes,
                     questions: test.totalQuestions,
                     status: test.status,
-                    highlightColor: isTaken ? const Color(0xFF0EA5E9) : null,
+                    highlightColor: isTaken
+                        ? Theme.of(context).colorScheme.primary
+                        : null,
                     onTap: isTaken ? () {} : () => _startTest(test),
                     actionLabel: isTaken ? 'Already Took' : 'Start Test',
                     actionEnabled: !isTaken,
