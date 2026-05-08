@@ -240,7 +240,9 @@ class _AddQuestionsScreenState extends State<AddQuestionsScreen> {
                     Text(
                       'Add one question at a time. Each saved question increments the order automatically.',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: const Color(0xFF64748B),
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.onSurface.withOpacity(0.5),
                       ),
                     ),
                     const SizedBox(height: 20),
@@ -323,7 +325,9 @@ class _AddQuestionsScreenState extends State<AddQuestionsScreen> {
                       Text(
                         'Choose one correct option using radio selection.',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: const Color(0xFF64748B),
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onSurface.withOpacity(0.5),
                         ),
                       ),
                       const SizedBox(height: 16),
@@ -339,7 +343,7 @@ class _AddQuestionsScreenState extends State<AddQuestionsScreen> {
                             margin: const EdgeInsets.only(bottom: 12),
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: AppTheme.surfaceMuted,
+                              color: AppTheme.surfaceMutedOf(context),
                               borderRadius: BorderRadius.circular(
                                 AppTheme.radiusMd,
                               ),
