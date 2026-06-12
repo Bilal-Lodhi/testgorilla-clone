@@ -384,7 +384,7 @@ flutter emulators --launch emulator-5554  # Launch emulator first
 flutter run -d emulator-5554
 ```
 
-**Run on iOS Simulator:**
+**Run On iOS Simulator:**
 
 ```bash
 flutter run -d iPhone
